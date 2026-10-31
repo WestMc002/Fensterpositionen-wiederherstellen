@@ -38,8 +38,8 @@ The interface is in German.
 
 ### Installation
 
-1. Download `Fensterpositionen wiederherstellen.exe` from the [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) and save it in any folder.
-2. Start it with a double-click.
+1. Download the ZIP file from the [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) and extract it to any folder.
+2. Start `Fensterpositionen wiederherstellen.exe` with a double-click.
 
 Requirements: Windows 10 or 11 with .NET Framework 4.x (included in Windows).
 
@@ -81,8 +81,8 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 
 ### Installation
 
-1. `Fensterpositionen wiederherstellen.exe` aus den [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) herunterladen und in einem beliebigen Ordner speichern.
-2. Per Doppelklick starten.
+1. Die ZIP-Datei aus den [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) herunterladen und in einen beliebigen Ordner entpacken.
+2. `Fensterpositionen wiederherstellen.exe` per Doppelklick starten.
 
 Voraussetzungen: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).
 

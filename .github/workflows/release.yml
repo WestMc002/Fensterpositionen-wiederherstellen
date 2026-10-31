@@ -1,8 +1,10 @@
 # Fensterpositionen wiederherstellen - automatische Bereitstellung der EXE
-# Baut das Programm, sobald ein Versions-Tag v<Version> (z. B. v2.19.2026.1031)
-# hochgeladen wird (oder per Hand ueber "Run workflow"), und legt ein Release
-# mit der EXE und der Anleitung an. Existiert das Release zur Version schon,
-# passiert nichts.
+# Baut das Programm, sobald ein Versions-Tag v<Version> (z. B. v2.21.2026.1031)
+# hochgeladen wird (oder per Hand ueber "Run workflow" mit der Version), und legt
+# ein Release mit einer ZIP-Datei an: "Fensterpositionen wiederherstellen.exe"
+# und Anleitung.txt (GitHub ersetzt Leerzeichen in einzeln hochgeladenen Dateien
+# durch Punkte, in der ZIP bleibt der Name erhalten). Existiert das Release zur
+# Version schon, passiert nichts.
 
 name: Release
 
@@ -24,7 +26,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Version lesen
         id: ver
@@ -61,6 +63,7 @@ jobs:
           if($LASTEXITCODE -ne 0) { throw 'Kompilieren fehlgeschlagen' }
           (Get-Item "Bin\Fensterpositionen wiederherstellen.exe").VersionInfo.FileVersion
           Copy-Item Anleitung.txt Bin\Anleitung.txt
+          Compress-Archive -Path "Bin\Fensterpositionen wiederherstellen.exe",Bin\Anleitung.txt -DestinationPath "Fensterpositionen-wiederherstellen-$ver.zip"
 
       - name: Release anlegen
         if: steps.ver.outputs.exists == '0'
@@ -68,12 +71,10 @@ jobs:
         run: |
           $ver = '${{ steps.ver.outputs.ver }}'
           $notes = @"
-          **Installation:** ``Fensterpositionen wiederherstellen.exe`` herunterladen, in einem beliebigen Ordner speichern und per Doppelklick starten. Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).
+          **Installation:** ``Fensterpositionen-wiederherstellen-$ver.zip`` herunterladen, in einen beliebigen Ordner entpacken und ``Fensterpositionen wiederherstellen.exe`` per Doppelklick starten. Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).
 
           Bei einem Update die vorhandene EXE einfach ersetzen. Gespeicherte Positionen liegen unter ``%LOCALAPPDATA%\Fensterpositionen wiederherstellen`` und bleiben erhalten.
 
-          ``Anleitung.txt`` neben die EXE legen, dann öffnet sie sich auch über das Info-Fenster.
-
-          **Installation (English):** download ``Fensterpositionen wiederherstellen.exe``, save it in any folder and start it with a double-click. Requires Windows 10 or 11 with .NET Framework 4.x. To update, simply replace the existing EXE.
+          **Installation (English):** download ``Fensterpositionen-wiederherstellen-$ver.zip``, extract it to any folder and start ``Fensterpositionen wiederherstellen.exe`` with a double-click. Requires Windows 10 or 11 with .NET Framework 4.x. To update, simply replace the existing EXE.
           "@
-          gh release create "v$ver" "Bin\Fensterpositionen wiederherstellen.exe" Bin\Anleitung.txt --title "Fensterpositionen wiederherstellen $ver" --notes $notes --target $env:GITHUB_SHA
+          gh release create "v$ver" "Fensterpositionen-wiederherstellen-$ver.zip" --title "Fensterpositionen wiederherstellen $ver" --notes $notes --target $env:GITHUB_SHA
