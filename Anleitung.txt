@@ -1,0 +1,350 @@
+FENSTERPOSITIONEN
+================
+Version 2.21 (Build-Datum wird angehängt, z.B. 2.21.2026.1031)
+Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
+Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
+Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
+Ohne Startwerte (z.B. nur die EXE aus GitHub) beginnt das Programm leer:
+dann zuerst die Fenster anordnen und "Positionen speichern" anklicken.
+Benötigt Windows mit .NET Framework 4.x (in Windows 10 und 11 enthalten).
+
+Wiederherstellen
+Programme auswählen und "Wiederherstellen" anklicken.
+Die gewählten Programme werden beendet, ihre Positionen wiederhergestellt
+und anschließend gestartet. Vor Änderungen werden Sicherungen angelegt.
+Falls das normale Schließen nicht genügt, werden die Prozesse beendet.
+Offene, noch nicht abgeschlossene Arbeiten vorher beenden.
+
+Positionen speichern
+Fenster zuerst an die gewünschten Stellen verschieben.
+Gewünschte Programme auswählen und "Positionen speichern" anklicken.
+Die Programme werden beendet, damit ihre Einstellungen geschrieben werden.
+Zuvor laufende Programme werden anschließend wieder gestartet.
+Die neuen Werte gelten für künftige Wiederherstellungen.
+
+Startwerte
+Task-Manager: Positionswerte aus settings_bak.json.
+Franz: windowState aus app-state.json.
+Discord: WINDOW_BOUNDS, IS_MAXIMIZED und IS_MINIMIZED aus settings.json.
+TeamSpeak 6: ts_main_window aus placement.json.
+DU Meter und GPU-Z: Werte aus den angegebenen REG-Dateien.
+Die Startwerte wurden am 19.10.2026 übernommen.
+Andere Einstellungen in den JSON-Dateien bleiben inhaltlich erhalten;
+die Formatierung der Dateien kann sich ändern.
+
+TeamSpeak 3
+Standardmäßig abgewählt. Wiederherstellen öffnet eine Dateiauswahl für
+eine SQLite-Datenbank (*.db). Diese ersetzt die gesamte settings.db,
+einschließlich weiterer Programmeinstellungen.
+Die bisherige Datenbank wird vorher gesichert und nicht vorab gelöscht.
+"Positionen speichern" sichert bei TeamSpeak 3 die gesamte Datenbank.
+Diese Sicherung kann später über die Dateiauswahl eingespielt werden.
+
+Speicherorte
+Einstellungsordner (ab Version 2.13):
+%LOCALAPPDATA%\Fensterpositionen wiederherstellen
+Eigene Positionen (auch die Liste der eigenen Programme):
+%LOCALAPPDATA%\Fensterpositionen wiederherstellen\Positionen.json
+Sicherungen:
+%LOCALAPPDATA%\Fensterpositionen wiederherstellen\Sicherungen
+Protokolldateien (eine Datei pro Tag, ältere als 30 Tage werden gelöscht):
+%LOCALAPPDATA%\Fensterpositionen wiederherstellen\TraceLogs\Protokoll-JJJJ-MM-TT.txt
+"Sicherungen öffnen" öffnet den Ordner Sicherungen; im Info-Fenster
+öffnet "Protokolle" den Ordner TraceLogs.
+Bis Version 2.12 lag alles unter %LOCALAPPDATA%\WestMc\Fensterpositionen.
+Beim ersten Start von 2.13 werden Positionen.json und Sicherungen von dort
+einmalig in den neuen Ordner kopiert (steht im Protokoll). Der alte Ordner
+bleibt unverändert und kann danach von Hand gelöscht werden.
+Startwerte.json wird nur verwendet, solange keine eigene Positionen.json existiert.
+Dateisicherungen können bei beendetem Zielprogramm manuell zurückkopiert werden.
+Registry-Sicherungen liegen als JSON vor: DU Meter als Base64-Binärwert,
+GPU-Z als Zeichenfolgen. Sie sind keine direkt importierbaren REG-Dateien.
+
+Fehler
+Jedes Programm erhält eine eigene Statusmeldung; Details stehen im Protokoll.
+Bei fehlenden Berechtigungen (z.B. TeamSpeak 3 unter Programme oder einem
+erhöht gestarteten Task-Manager) kann ein Start als Administrator nötig sein.
+Es wird keine automatische Rechteerhöhung angefordert.
+
+Prüfung
+EXE kompiliert; Wiederherstellung und Sicherung mit Testdateien geprüft,
+ebenso der Schutz anderer Einstellungen und das Ablehnen fehlender Werte.
+Selbsttest: "Fensterpositionen wiederherstellen.exe" --self-test
+Er arbeitet nur im Temp-Ordner (%TEMP%\Fensterpositionen wiederherstellen),
+das Ergebnis steht dort in Testergebnis.txt ("OK: ..." oder "FEHLER: ...").
+Die Testdaten werden nach einem erfolgreichen Test wieder gelöscht.
+Oberfläche visuell geprüft.
+Die tatsächlichen Programme und die Registry wurden beim Test nicht verändert.
+
+Ordner im Projekt
+-----------------
+Quellcode         Fensterpositionen.cs   Programmstart, Name, EXE-Angaben
+                  Hauptfenster.cs        Hauptfenster und Abläufe
+                  Dialoge.cs             Info-Fenster, "Programm hinzufügen"
+                  Oberflaeche.cs         Farben, Schriften, Steuerelemente
+                  Ausrichten.cs          Fenster messen, ausrichten, verschieben
+                  Speicher.cs            Positionen, Sicherungen, Protokoll, Selbsttest
+                  VersionInfo.cs         von Erstellen.bat erzeugt
+Resources         Fensterpositionen.ico, GS-Logo.png, Startwerte.json
+                  (wird vom Programm gebraucht oder eingebettet)
+Design            nur Entwürfe und Bilder, vom Programm nicht gebraucht:
+  Icon-Vorschläge   Icon-Entwürfe (ICO, SVG, Übersichtsbild)
+  Vorschau          Vorschaubilder hell/dunkel (von Erstellen.bat erzeugt)
+Backup            Sicherung des ganzen Projekts je Version
+Screenshots       Bilder für GitHub (README.md), paarweise hell/dunkel:
+                  hell/dunkel (Hauptfenster), ablauf-, hinzufuegen- und info-;
+                  kopiert Erstellen.bat aus Design\Vorschau
+Im Projektordner selbst liegen nur Erstellen.bat, die EXE, Anleitung.txt,
+README.md, .gitignore und die Ordner (Erstellen.log entsteht beim Erstellen).
+Zusätzlich bleibt bewusst die Verknüpfung "Fensterpositionen wiederherstellen.lnk" dort.
+Ein Ordner TraceLogs gibt es im Projekt nicht: Die Protokolldateien liegen
+wie Positionen und Sicherungen unter %LOCALAPPDATA%\Fensterpositionen wiederherstellen.
+
+Sichtbare Fensterkanten ausrichten
+---------------------------------
+Die Funktion "Unten ausrichten (18 px)" verschiebt die ausgewählten,
+bereits geöffneten Fenster. Sie misst die sichtbare Unterkante über DWM
+und berücksichtigt unsichtbare Windows-Fensterrahmen sowie DPI-Skalierung.
+Ziel: 18 physische Bildschirmpixel Abstand zur Unterkante des Arbeitsbereichs.
+Bei einer Taskleiste unten entspricht das dem Abstand zur Taskleiste.
+DU Meter und TeamSpeak 3 werden dabei übersprungen.
+Minimierte oder maximierte Fenster müssen zuerst normal geöffnet werden.
+Fenstergrößen und horizontale Positionen bleiben erhalten.
+Die Funktion prüft die neue sichtbare Kante und meldet Abweichungen.
+Danach "Positionen speichern" anklicken, um die Werte dauerhaft zu übernehmen.
+Eine tatsächliche Ausrichtung der Benutzerfenster wurde in der
+Entwicklungsumgebung nicht getestet; die neue EXE wurde kompiliert,
+die Dateiverarbeitung getestet und die Oberfläche visuell geprüft.
+
+Oben und an den Seiten ausrichten
+--------------------------------
+1. TeamSpeak 3, TeamSpeak 6, Franz und Task-Manager normal öffnen.
+2. Diese vier Programme im Positionsprogramm auswählen
+   (TeamSpeak 3 ist anfangs nicht angehakt).
+3. "Oben / Seiten (18 px)" anklicken.
+   TeamSpeak 3 und 6: oben und unten 18 physische Bildschirmpixel; Höhe wird angepasst.
+   Franz: oben, unten und links jeweils 18 physische Bildschirmpixel; Höhe wird angepasst.
+   Task-Manager: rechts 18 physische Bildschirmpixel;
+   seine vertikale Position bleibt erhalten.
+   Bezugspunkt ist der Arbeitsbereich des jeweiligen Bildschirms.
+4. "Positionen speichern" zum dauerhaften Übernehmen anklicken.
+   Bei TeamSpeak 3 wird dabei die vollständige Datenbank gesichert.
+DU Meter: oben und rechts jeweils 18 physische Bildschirmpixel.
+Discord wird links und unten auf 18 Bildschirmpixel ausgerichtet; die Höhe bleibt erhalten. GPU-Z bleibt bei dieser Schaltfläche unverändert.
+Bei Franz und TeamSpeak 3/6 wird die Höhe an den Arbeitsbereich angepasst; die Breite bleibt erhalten. DU Meter und Task-Manager werden nur verschoben.
+
+
+DU-Meter-Dienst
+---------------
+Nach einer erfolgreichen Ausrichtung von DU Meter startet das Programm
+DUMeterSvc neu und wartet jeweils auf den Dienststatus.
+Das gilt für die Ausrichtung über die Schaltflächen. Bei der unteren
+Ausrichtung wird DU Meter weiterhin übersprungen.
+Für den Neustart sind in der Regel Administratorrechte erforderlich:
+"Fensterpositionen wiederherstellen.exe" bei Bedarf per Rechtsklick als Administrator starten.
+Wenn der Neustart scheitert, zeigt das Protokoll an, dass das Fenster bereits
+ausgerichtet wurde, aber der Dienstneustart fehlgeschlagen ist.
+Der Dienst wurde beim Entwicklungstest nicht tatsächlich neu gestartet.
+Nachkorrektur beim Start
+-----------------------
+Ausrichtungsregeln werden nun zusätzlich in Positionen.json gespeichert.
+Nach dem Start über "Wiederherstellen" und nach dem Neustart beim Speichern
+werden diese Regeln während der Ladephase erneut angewandt und geprüft.
+Das dauert etwa 14 Sekunden je Programm, bei verzögertem Start bis ca. 27.
+Für ältere Profile gelten als Vorgabe:
+Franz oben/unten/links; Discord unten/links, jeweils 18 Bildschirmpixel.
+Andere Programme erhalten eine Startregel, sobald sie über eine der
+Ausrichtungsschaltflächen ausgerichtet wurden.
+Beim DU Meter erfolgt nach der Startkorrektur ebenfalls ein Dienstneustart.
+Direkte Starts über Windows-Verknüpfungen oder Autostart werden nicht überwacht.
+Das Positionsprogramm muss die Programme selbst starten, damit es nachkorrigiert.
+Bei 175 % Skalierung sind durch Windows Rundungen um einen Pixel möglich.
+
+Die Geometriefunktion wurde an einem eigenen Testfenster geprüft:
+oben/unten/links 18 px mit maximal 1 px Rundung, Breite erhalten,
+wiederholte Ausrichtung stabil. Der Startablauf von Franz und Discord
+konnte in der Entwicklungsumgebung nicht geprüft werden.
+
+DU Meter nach Wiederherstellen
+------------------------------
+Nach dem Wiederherstellen von DU Meter wird DUMeterSvc jetzt unabhängig
+von einer gespeicherten Ausrichtungsregel neu gestartet.
+Wenn eine Regel vorhanden ist, erfolgt der Dienstneustart nach der
+Startkorrektur. Es erfolgt dabei nur ein Dienstneustart pro Wiederherstellung.
+Auch bei einer fehlgeschlagenen Startkorrektur wird der Neustart versucht.
+Ein fehlgeschlagener Registry-Import erreicht diesen Schritt nicht.
+Erfolg oder Fehler des Dienstneustarts werden protokolliert.
+Für den Dienstneustart sind in der Regel Administratorrechte erforderlich.
+Der tatsächliche Dienst wurde bei der Entwicklungsprüfung nicht verändert.
+
+Akzentfarbe
+-----------
+Die Hauptschaltfläche, Häkchen, Versions-Plakette, Laufbalken und der Website-Link
+verwenden die Windows-Akzentfarbe (Einstellungen > Personalisierung > Farben).
+Wie in Windows 11: im hellen Modus eine dunklere Stufe mit weißer Schrift,
+im dunklen Modus eine hellere Stufe mit schwarzer Schrift. Ist eine Akzentfarbe
+zu hell oder zu dunkel, wird sie für gute Lesbarkeit automatisch angepasst.
+Grün, Rot und Gelb für den Status bleiben fest. Die Akzentfarbe steht beim
+Start im Protokoll; eine Änderung in Windows wird sofort übernommen.
+
+Easy2Sync
+---------
+Easy2Sync speichert seine Fensterposition in einer eigenen Binärdatei
+(%APPDATA%\Itsth\Easy2Sync\easy2sync.odb), die nicht verändert wird.
+Stattdessen misst das Programm das offene Easy2Sync-Fenster direkt:
+"Positionen speichern" liest die aktuelle Position und Größe, ohne Easy2Sync
+zu beenden. "Wiederherstellen" verschiebt das offene Fenster an diese Stelle;
+läuft Easy2Sync nicht, wird es gestartet und das Fenster danach mehrfach gesetzt.
+Easy2Sync merkt sich die neue Position beim nächsten Beenden selbst.
+Verwendet wird Easy2Sync64Bit.exe (falls vorhanden), sonst Easy2Sync.exe,
+aus C:\Program Files (x86)\Easy2Sync. Beide Varianten werden erkannt.
+"Unten ausrichten" funktioniert auch für Easy2Sync.
+Läuft Easy2Sync mit Administratorrechten, darf ein normal gestartetes Programm
+sein Fenster nicht verschieben (Meldung "Zugriff verweigert"). Dann oben auf
+"Als Administrator" klicken; das Programm startet mit Administratorrechten neu
+(Titelleiste zeigt "(Administrator)").
+"Oben / Seiten (18 px)" setzt Easy2Sync waagerecht mittig auf seinen Bildschirm;
+Größe und Höhe bleiben erhalten. Danach "Positionen speichern" anklicken.
+Dabei werden auch weitere offene Easy2Sync-Fenster (z.B. das Fenster
+"Synchronisation: ...") waagerecht mittig gesetzt. Easy2Sync merkt sich deren
+Position beim Schließen selbst. Ist das Fenster gerade nicht offen, bleibt es
+unverändert; dann beim nächsten Mal mit offenem Fenster erneut klicken.
+
+Eigene Programme hinzufügen
+---------------------------
+Über "Programm hinzufügen" (oben rechts in der Programmliste) lässt sich
+jedes geöffnete Fenster aufnehmen, z.B. Browser, Explorer-Programme oder Tools.
+1. Das Programm öffnen und sein Fenster an die gewünschte Stelle schieben.
+2. "Programm hinzufügen" anklicken, das Fenster in der Liste auswählen und
+   bei Bedarf den Namen ändern, dann "Hinzufügen".
+   Die aktuelle Position und Größe werden dabei gleich gespeichert.
+Eigene Programme werden wie Easy2Sync behandelt: Sie werden nie beendet,
+"Positionen speichern" misst das offene Fenster, "Wiederherstellen" verschiebt
+es zurück. Läuft das Programm nicht, wird es gestartet (sofern der
+Programmpfad bekannt ist) und das Fenster danach gesetzt.
+"Unten ausrichten (18 px)" gilt auch für eigene Programme; bei
+"Oben / Seiten (18 px)" werden sie übersprungen.
+Erkannt wird das Programm am Prozessnamen (z.B. notepad.exe); es wird sein
+Hauptfenster verwendet. In der Liste steht hinter dem Namen "Eigenes".
+Entfernen: Rechtsklick auf die Zeile > "… entfernen". Dabei wird auch die
+gespeicherte Position gelöscht; das Programm selbst bleibt unverändert.
+Programme mit Administratorrechten erscheinen ohne Programmpfad; sie werden
+dann nicht automatisch gestartet. Zum Verschieben solcher Fenster
+"Als Administrator" verwenden.
+
+Veröffentlichung auf GitHub
+---------------------------
+Repository: https://github.com/WestMc002/Fensterpositionen-wiederherstellen
+Lizenz: GNU General Public License v3.0 oder später (Datei LICENSE).
+Ausnahme: Das GS-Logo (Resources\GS-Logo.png) ist von der GPL ausgenommen,
+alle Rechte vorbehalten; es darf nur unverändert mit dem Programm
+weitergegeben werden.
+Hochgeladen werden Quellcode (ohne VersionInfo.cs), Resources (ohne
+Startwerte.json), Screenshots, Erstellen.bat, Anleitung.txt, README.md,
+LICENSE und .gitignore.
+Nicht hochgeladen werden Backup, Design, die EXE, Erstellen.log, die
+Verknüpfung (.lnk) und Resources\Startwerte.json; das regelt die Datei
+.gitignore. Startwerte.json enthält die Fensterkoordinaten des eigenen
+Monitor-Aufbaus und bleibt nur im Projektordner.
+Die Vorschaubilder zeigen eine Demo-Ansicht: ohne eigene Programme und mit
+%LOCALAPPDATA% statt des Benutzerordners. Auch das Protokoll zeigt Pfade so an.
+Erzeugt werden je hell und dunkel: Hauptfenster, ein Demo-Ablauf (eigenes
+Programm hinzugefügt, Fenster ausgerichtet), das Info-Fenster und der Dialog
+"Programm hinzufügen" mit einer festen Demo-Liste statt der offenen Fenster.
+Das Rechtsklick-Menü ist nicht dabei (lässt sich unsichtbar nicht aufnehmen).
+Downloads (Releases) baut GitHub automatisch, sobald eine neue Version
+mit einem Versions-Tag (z.B. v2.21.2026.1031) hochgeladen wird.
+
+Info und Signatur
+-----------------
+Unten steht wie beim Monitor Dimmer links "© Jahr · Fensterpositionen",
+rechts das GS-Logo mit "Günther Schoder" und "www.westmc002.de"; ein Klick
+darauf öffnet die Website. Ein Klick auf die Versions-Plakette oben
+öffnet das Info-Fenster (Version, Erstellungsdatum, Farbschema, Speicherort,
+Anleitung, Sicherungen, Protokolle). Das Logo GS-Logo.png wird beim Erstellen in die EXE
+eingebettet. Dateieigenschaften der EXE: Copyright "© 2026 Günther Schoder",
+kein Firmenname.
+
+Versionen
+---------
+Muster: Hauptversion.Nebenversion.Jahr.MonatTag, z.B. 2.1.2026.1029.
+Die Hauptversion steht in Erstellen.bat (SET "MAJOR=2").
+Die Nebenversion zählt Erstellen.bat bei jedem Erstellen automatisch um 1 hoch
+(2.1, 2.2, 2.3 ...), ausgehend von der höchsten Version der aktuellen EXE
+und der EXE-Dateien im Ordner Backup. Jahr und MonatTag kommen aus dem Datum.
+Die Nummer wird in VersionInfo.cs geschrieben und in die EXE übernommen
+(Rechtsklick > Eigenschaften > Details). Sie erscheint außerdem in der
+Titelleiste, im Kopfbereich und im Protokoll.
+
+Erstellen und Backup
+--------------------
+Erstellen.bat per Doppelklick ausführen (ersetzt das frühere Erstellen.ps1).
+Das Programm muss dabei beendet sein; sonst wartet das Skript darauf.
+Ablauf:
+1. Nebenversion um 1 erhöhen, Versionsnummer bilden und VersionInfo.cs schreiben.
+2. Kompilieren in "Fensterpositionen wiederherstellen.neu.exe".
+   Bei Fehlern bleibt die bisherige EXE unverändert; Details in Erstellen.log.
+3. Hat die bisherige EXE noch keinen Ordner in Backup, wird sie dorthin
+   verschoben (Ordner "<Name> v<alte Version>").
+4. Die neue EXE wird zu "Fensterpositionen wiederherstellen.exe".
+5. Vorschaubilder hell/dunkel werden im Ordner Design\Vorschau erzeugt.
+6. Das gesamte Projekt (EXE, Quellcode, Icons, Anleitung, Vorschau usw.)
+   wird nach "Backup\Fensterpositionen wiederherstellen v<Version>" kopiert,
+   z.B. "Backup\Fensterpositionen wiederherstellen v2.2.2026.1029".
+   Ausgenommen sind der Ordner Backup selbst und Erstellen.log.
+Ordnernamen im Projekt werden groß geschrieben (Backup, Design, Quellcode, Resources).
+Da jeder Build eine neue Nebenversion bekommt, ist jeder Ordnername eindeutig,
+auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
+Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
+die Nebenversion beginnt dann wieder bei 0.
+
+2.19 bis 2.21  Vorbereitung für GitHub: README.md, .gitignore, Lizenzkopf (GPL v3)
+               in allen Quelldateien, Screenshots hell/dunkel aus der Vorschau
+               (Hauptfenster, Demo-Ablauf, Info-Fenster, "Programm hinzufügen").
+               Vorschau als Demo-Ansicht ohne eigene Programme und Benutzerpfade;
+               Pfade im Protokoll mit %LOCALAPPDATA%. Start ohne Startwerte.json
+               möglich (beginnt dann leer); Startwerte.json wird nicht veröffentlicht.
+2.13           "Programm hinzufügen": beliebige geöffnete Fenster aufnehmen,
+               Entfernen per Rechtsklick. Quellcode auf mehrere Dateien aufgeteilt.
+               Einstellungsordner jetzt %LOCALAPPDATA%\Fensterpositionen wiederherstellen
+               (alte Daten werden einmalig übernommen). Protokoll zusätzlich als
+               Tagesdatei in TraceLogs. Selbsttest arbeitet im Temp-Ordner.
+               Icon-Übersichtsbild (Design\Icon-Vorschläge) neu mit aktuellem Icon.
+               Kontextmenü wie Monitor Dimmer/WindowGrid (Maße, Textmitte, Symbol,
+               Abstand Symbol -> Text 8, ohne alten eckigen Schatten).
+               Info-Fenster und "Programm hinzufügen": feste Größe ohne
+               Größenänderungs-Pfeile am Fensterrand.
+2.12           Ordnerstruktur wie bei den anderen Programmen: Quellcode, Resources
+               und Design (Icon-Vorschläge, Vorschaubilder); Erstellen.bat nach der
+               Vorlage, ohne grauen Fensterhintergrund (COLOR 80 entfernt).
+2.9            Info-Fenster mit normalem Fensterrahmen (Icon wie bei den Hauptfenstern),
+               Größe weiterhin fest.
+               Globale Richtlinien: kein Firmenname in den EXE-Eigenschaften,
+               Fußzeile links nur "© Jahr · Fensterpositionen".
+2.8            Windows-11-Farben: neutrales Grau (hell #F3F3F3, dunkel #202020/#2B2B2B),
+               Statusfarben wie Windows; Rundungen 4 px (Bedienelemente) und 8 px (Karten).
+               Erstellen.bat: Kopf wie bei den anderen Programmen, Farbe grau/grün/rot.
+2.4 bis 2.7    Easy2Sync: auch das Synchronisationsfenster wird mittig gesetzt.
+               Akzentfarbe aus Windows (Personalisierung > Farben) für Schaltflächen,
+               Häkchen, Plakette, Laufbalken und Link; Wechsel wird sofort übernommen.
+               Fußzeile einheitlich mit dem Monitor Dimmer (Logo, Name, Website).
+2.3            Beim Start ist kein Programm angehakt; nur Angehaktes wird bearbeitet.
+               Schaltfläche "Als Administrator" (Neustart mit Administratorrechten);
+               genauere Meldung, wenn Windows das Verschieben verweigert.
+2.2            Easy2Sync: "Oben / Seiten" zentriert das Fenster waagerecht.
+               Backup sichert bei jedem Erstellen das ganze Projekt in einen
+               eigenen Ordner je Version; Erstellen wartet, bis das Programm beendet ist.
+2.1            Easy2Sync aufgenommen (Fenster wird direkt gemessen/verschoben),
+               Info-Fenster mit Logo, Signatur unten rechts,
+               Hersteller/Copyright "Günther Schoder" in der EXE.
+               Backup-Versionierung beim Erstellen (Erstellen.bat),
+               Vorschaubilder hell/dunkel, Icon "Layout" mit feinem Rahmen.
+2.0.2026.1029  Neue, dunkle Oberfläche: Programmliste mit farbigen
+               Statusanzeigen, Schaltflächen mit Symbolen, Fortschrittsbalken
+               während der Bearbeitung, dunkle Titelleiste (Windows 11),
+               scharfe Darstellung bei hoher Skalierung (z.B. 175 %).
+               Helles oder dunkles Design passend zur Windows-Einstellung
+               "Standard-App-Modus"; ein Wechsel wird sofort übernommen.
+               Programm-Icon ist in die EXE eingebettet.
+               Neues Icon "Layout" (Vorlage: Design\Icon-Vorschläge).
+               Programmlogik unverändert.

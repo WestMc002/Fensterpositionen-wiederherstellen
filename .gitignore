@@ -1,0 +1,25 @@
+# Lokale Sicherungen und Build-Ergebnisse
+Backup/
+*.exe
+*.neu.exe
+Erstellen.log
+Quellcode/VersionInfo.cs
+
+# Eigene Entwürfe und Vorschaubilder (nicht veröffentlicht)
+Design/
+
+# Eigene Startwerte (Fensterkoordinaten des eigenen Monitor-Aufbaus)
+Resources/Startwerte.json
+
+# Verknüpfung im Projektordner (enthält lokale Pfade)
+*.lnk
+
+# Laufzeitdaten, falls sie im Projektordner landen
+TraceLogs/
+Testdaten/
+Testergebnis.txt
+Positionen.json
+
+# Windows
+Thumbs.db
+desktop.ini
