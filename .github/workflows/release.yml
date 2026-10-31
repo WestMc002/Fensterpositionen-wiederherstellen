@@ -4,7 +4,8 @@
 # ein Release mit einer ZIP-Datei an: "Fensterpositionen wiederherstellen.exe"
 # und Anleitung.txt (GitHub ersetzt Leerzeichen in einzeln hochgeladenen Dateien
 # durch Punkte, in der ZIP bleibt der Name erhalten). Existiert das Release zur
-# Version schon, passiert nichts.
+# Version schon mit der ZIP-Datei, passiert nichts; fehlt die ZIP-Datei (aeltere
+# Releases mit einzelner EXE), wird sie ergaenzt und die alten Dateien entfernt.
 
 name: Release
 
@@ -36,9 +37,10 @@ jobs:
           if(-not $ver) { $ver = '${{ github.ref_name }}'.TrimStart('v') }
           if($ver -notmatch '^\d+\.\d+\.\d{4}\.\d{4}$') { throw "Ungueltige Version: $ver" }
           "ver=$ver" >> $env:GITHUB_OUTPUT
-          gh release view "v$ver" *> $null
-          if($LASTEXITCODE -eq 0) { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits" }
-          else { "exists=0" >> $env:GITHUB_OUTPUT }
+          $assets = gh release view "v$ver" --json assets --jq '.assets[].name' 2>$null
+          if($LASTEXITCODE -ne 0) { "exists=0" >> $env:GITHUB_OUTPUT; "release=0" >> $env:GITHUB_OUTPUT }
+          elseif($assets -contains "Fensterpositionen-wiederherstellen-$ver.zip") { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits" }
+          else { "exists=0" >> $env:GITHUB_OUTPUT; "release=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver ohne ZIP-Datei - wird ergaenzt" }
           exit 0
 
       - name: Kompilieren
@@ -77,4 +79,13 @@ jobs:
 
           **Installation (English):** download ``Fensterpositionen-wiederherstellen-$ver.zip``, extract it to any folder and start ``Fensterpositionen wiederherstellen.exe`` with a double-click. Requires Windows 10 or 11 with .NET Framework 4.x. To update, simply replace the existing EXE.
           "@
-          gh release create "v$ver" "Fensterpositionen-wiederherstellen-$ver.zip" --title "Fensterpositionen wiederherstellen $ver" --notes $notes --target $env:GITHUB_SHA
+          $zip = "Fensterpositionen-wiederherstellen-$ver.zip"
+          if('${{ steps.ver.outputs.release }}' -eq '1') {
+            gh release upload "v$ver" $zip --clobber
+            foreach($name in (gh release view "v$ver" --json assets --jq '.assets[].name')) {
+              if($name -ne $zip) { gh release delete-asset "v$ver" $name -y }
+            }
+            gh release edit "v$ver" --notes $notes
+          } else {
+            gh release create "v$ver" $zip --title "Fensterpositionen wiederherstellen $ver" --notes $notes --target $env:GITHUB_SHA
+          }
