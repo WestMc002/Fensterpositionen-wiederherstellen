@@ -29,6 +29,7 @@ The interface is in German.
   - Programs that store their position in a settings file or in the registry are closed, their values are changed and the program is started again. A backup is made before every change.
   - Easy2Sync and your own programs stay open; their window is measured and moved directly.
 - **Add any program:** pick any open window, its position and size are saved right away. Remove it again with a right-click.
+- **Only what you use:** built-in programs that are not installed are not shown; others can be hidden with a right-click (and shown again the same way).
 - **Align windows** to the visible window edge (18 px from the edge of the work area): bottom, or top/sides per program. Invisible Windows borders and DPI scaling are taken into account.
 - **Correction while starting:** saved alignment rules are re-applied while a program loads.
 - Nothing is selected at start – only the checked programs are processed.
@@ -47,7 +48,7 @@ Data folder: `%LOCALAPPDATA%\Fensterpositionen wiederherstellen` (saved position
 
 At first start no positions are saved yet: arrange your windows, check the programs and click “Positionen speichern” first.
 
-The built-in programs use the usual installation paths (e.g. `C:\Program Files (x86)\…`). Programs installed elsewhere can be added with “Programm hinzufügen”.
+The built-in programs use the usual installation paths (e.g. `C:\Program Files (x86)\…`). Those not found are not shown. Programs installed elsewhere can be added with “Programm hinzufügen”.
 
 ### Building from source
 
@@ -72,6 +73,7 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
   - Programme, die ihre Position in einer Einstellungsdatei oder der Registry speichern, werden beendet, die Werte geändert und das Programm wieder gestartet. Vor jeder Änderung wird eine Sicherung angelegt.
   - Easy2Sync und eigene Programme bleiben offen; ihr Fenster wird direkt gemessen und verschoben.
 - **Beliebige Programme hinzufügen:** ein geöffnetes Fenster auswählen, Position und Größe werden gleich gespeichert. Entfernen per Rechtsklick.
+- **Nur was du brauchst:** Fest eingebaute Programme, die nicht installiert sind, erscheinen nicht; andere lassen sich per Rechtsklick ausblenden (und genauso wieder anzeigen).
 - **Fenster ausrichten** an der sichtbaren Fensterkante (18 px Abstand zum Rand des Arbeitsbereichs): unten oder oben/seitlich je Programm. Unsichtbare Windows-Fensterrahmen und DPI-Skalierung werden berücksichtigt.
 - **Nachkorrektur beim Start:** gespeicherte Ausrichtungen werden während der Ladephase eines Programms erneut angewandt.
 - Beim Start ist nichts angehakt – bearbeitet wird nur, was angehakt ist.
@@ -90,7 +92,7 @@ Datenordner: `%LOCALAPPDATA%\Fensterpositionen wiederherstellen` (gespeicherte P
 
 Beim ersten Start sind noch keine Positionen gespeichert: Fenster anordnen, Programme anhaken und zuerst „Positionen speichern“ anklicken.
 
-Die fest eingebauten Programme werden an den üblichen Installationsorten erwartet (z. B. `C:\Program Files (x86)\…`). Anders installierte Programme lassen sich über „Programm hinzufügen“ aufnehmen.
+Die fest eingebauten Programme werden an den üblichen Installationsorten erwartet (z. B. `C:\Program Files (x86)\…`). Nicht gefundene werden nicht angezeigt. Anders installierte Programme lassen sich über „Programm hinzufügen“ aufnehmen.
 
 Ausführliche Anleitung: [Anleitung.txt](Anleitung.txt).
 

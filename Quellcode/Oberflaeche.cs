@@ -417,6 +417,12 @@ public class ProgramList:Panel {
   AutoScrollMinSize=new Size(0,Rows.Count*RowHeight);
   Invalidate();
  }
+ public void Insert(int index,ProgramRow row) {
+  row.Owner=this;Rows.Insert(Math.Max(0,Math.Min(index,Rows.Count)),row);
+  AutoScrollMinSize=new Size(0,Rows.Count*RowHeight);
+  Invalidate();
+  if(CheckedChanged!=null)CheckedChanged(this,EventArgs.Empty);
+ }
  public void Remove(ProgramRow row) {
   if(!Rows.Remove(row))return;
   row.Owner=null;
@@ -428,7 +434,7 @@ public class ProgramList:Panel {
  string TipText(int index) {
   var row=Rows[index];
   string text=row.Name+": "+row.Status;
-  if(row.Entry!=null&&row.Entry.Custom)text+="\r\nEigenes Programm – Rechtsklick zum Entfernen";
+  if(row.Entry!=null)text+=row.Entry.Custom?"\r\nEigenes Programm – Rechtsklick zum Entfernen":"\r\nRechtsklick zum Ausblenden";
   return text;
  }
  internal void RowChanged(bool checkedChanged) {
@@ -458,7 +464,8 @@ public class ProgramList:Panel {
   base.OnMouseClick(e);
   if(!Enabled)return;
   int index=IndexAt(e.Location);
-  if(index<0)return;
+  // Rechtsklick auf freie Fläche: Menü ohne Zeile (z.B. ausgeblendete Programme wieder anzeigen).
+  if(index<0){if(e.Button==MouseButtons.Right&&RowMenu!=null)RowMenu(this,new RowMenuEventArgs{Row=null,Location=e.Location});return;}
   focusIndex=index;
   if(e.Button==MouseButtons.Right){Invalidate();if(RowMenu!=null)RowMenu(this,new RowMenuEventArgs{Row=Rows[index],Location=e.Location});return;}
   if(e.Button!=MouseButtons.Left)return;

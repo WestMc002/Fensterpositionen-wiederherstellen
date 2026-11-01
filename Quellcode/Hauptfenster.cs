@@ -34,6 +34,8 @@ public class MainForm:Form {
  Bitmap signature;
  Label selectionInfo=new Label();
  List<Entry> entries=new List<Entry>();
+ // Alle fest eingebauten Programme in ihrer Reihenfolge (auch ausgeblendete und nicht installierte).
+ readonly List<Entry> builtIns=new List<Entry>();
  Dictionary<string,object> profiles;
  bool busy;
  public MainForm() {
@@ -45,7 +47,18 @@ public class MainForm:Form {
   // Einstellungen aus dem alten Ordner (bis Version 2.12) einmalig übernehmen.
   string migrated=DemoMode?null:Store.MigrateOldFolder();
   Setup();profiles=Store.Load();
-  if(!DemoMode)entries.AddRange(Store.CustomEntries(profiles));
+  builtIns.AddRange(entries);
+  string skipped=null,hiddenNames=null;
+  if(!DemoMode) {
+   // Fest eingebaute Programme, die hier nicht installiert sind, erscheinen nicht; selbst ausgeblendete ebenso.
+   var hidden=Store.HiddenIds(profiles);
+   var missing=entries.Where(x=>!Installed(x)).ToList();
+   var off=entries.Where(x=>hidden.Contains(x.Id)&&Installed(x)).ToList();
+   if(missing.Count>0)skipped=String.Join(", ",missing.Select(x=>x.Name).ToArray());
+   if(off.Count>0)hiddenNames=String.Join(", ",off.Select(x=>x.Name).ToArray());
+   entries.RemoveAll(x=>missing.Contains(x)||off.Contains(x));
+   entries.AddRange(Store.CustomEntries(profiles));
+  }
   restore=new ModernButton("Wiederherstellen",ButtonKind.Primary,"");
   save=new ModernButton("Positionen speichern",ButtonKind.Secondary,"");
   align=new ModernButton("Unten ausrichten (18 px)",ButtonKind.Secondary,"");
@@ -101,7 +114,7 @@ public class MainForm:Form {
   hint.Dock=DockStyle.Fill;hint.Margin=new Padding(0,0,0,Ui.Px(14));
   // Drei kurze Zeilen, je ein Thema, damit nichts mitten im Satz umbricht.
   hint.Text="Ausgewählte Programme werden beendet und beim Wiederherstellen danach gestartet.\r\n"+
-   "Easy2Sync und eigene Programme bleiben offen – nur ihr Fenster wird verschoben. Eigene Programme per Rechtsklick entfernen.\r\n"+
+   "Easy2Sync und eigene Programme bleiben offen – nur ihr Fenster wird verschoben. Rechtsklick auf ein Programm: ausblenden bzw. entfernen.\r\n"+
    "TeamSpeak 3: vollständige Datenbanksicherung mit manueller Dateiauswahl.";
 
   var logCard=new Card{Dock=DockStyle.Fill,Margin=new Padding(0),Padding=new Padding(Ui.Px(16),Ui.Px(6),Ui.Px(8),Ui.Px(12))};
@@ -153,6 +166,8 @@ public class MainForm:Form {
   if(migrated!=null)Log(migrated);
   Log("Positionen: "+Store.Display(Store.Profiles));
   Log("Protokolldatei: "+Store.Display(TraceLog.Today));
+  if(skipped!=null)Log("Nicht installiert (nicht angezeigt): "+skipped);
+  if(hiddenNames!=null)Log("Ausgeblendet: "+hiddenNames+" – Rechtsklick in die Liste zeigt sie wieder an.");
   int customCount=entries.Count(x=>x.Custom);
   if(customCount>0)Log("Eigene Programme: "+customCount);
  }
@@ -431,15 +446,81 @@ public class MainForm:Form {
   if(note!=null)Log(entry.Name+": "+note+" Danach \"Positionen speichern\" verwenden.");
   else Log(entry.Name+": "+status);
  }
+ // Programm gilt als installiert, wenn die Programmdatei existiert oder es gerade läuft.
+ static bool Installed(Entry e) {
+  if(e.Custom)return true;
+  try {
+   if(!String.IsNullOrEmpty(e.Exe)&&System.IO.File.Exists(e.Exe))return true;
+   foreach(string name in new[]{e.ProcessName,e.AltProcessName}) {
+    if(String.IsNullOrEmpty(name))continue;
+    var running=Process.GetProcessesByName(name);
+    bool any=running.Length>0;
+    foreach(var p in running)p.Dispose();
+    if(any)return true;
+   }
+  } catch {}
+  return false;
+ }
+ // Selbst ausgeblendete, installierte Programme (für "wieder anzeigen").
+ List<Entry> HiddenBuiltIns() {
+  var hidden=Store.HiddenIds(profiles);
+  return builtIns.Where(x=>hidden.Contains(x.Id)&&!entries.Contains(x)&&Installed(x)).ToList();
+ }
  void ShowRowMenu(object sender,RowMenuEventArgs e) {
-  if(busy||e.Row==null||e.Row.Entry==null||!e.Row.Entry.Custom)return;
+  if(busy)return;
   var row=e.Row;
+  var hidden=HiddenBuiltIns();
+  if((row==null||row.Entry==null)&&hidden.Count==0)return;
   // Menü bei jedem Öffnen neu aufbauen, damit Farben und Symbol zum aktuellen Hell-/Dunkelmodus passen.
   MenuStyle.Prepare(rowMenu);
   rowMenu.Items.Add(MenuStyle.TopSpacer());
-  rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ entfernen",'\uE74D',(s,a)=>RemoveProgram(row)));
+  if(row!=null&&row.Entry!=null) {
+   if(row.Entry.Custom)rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ entfernen",'\uE74D',(s,a)=>RemoveProgram(row)));
+   else rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ ausblenden",'\uED1A',(s,a)=>HideProgram(row)));
+  }
+  if(hidden.Count>0) {
+   if(row!=null&&row.Entry!=null)rowMenu.Items.Add(new ToolStripSeparator());
+   rowMenu.Items.Add(MenuStyle.Item("Ausgeblendete wieder anzeigen ("+hidden.Count+")",'\uE890',(s,a)=>ShowHiddenPrograms()));
+  }
   rowMenu.Items.Add(MenuStyle.BottomSpacer());
   rowMenu.Show(list,e.Location);
+ }
+ // Fest eingebautes Programm ausblenden; gespeicherte Werte bleiben erhalten.
+ void HideProgram(ProgramRow row) {
+  if(busy)return;
+  var entry=row.Entry;
+  var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+  var ids=Store.HiddenIds(copy);ids.Add(entry.Id);
+  Store.SetHiddenIds(copy,ids);
+  try {Store.Write(Store.Profiles,copy);}
+  catch(Exception ex) {Log(entry.Name+": konnte nicht ausgeblendet werden – "+ex.Message);return;}
+  profiles=copy;
+  entries.Remove(entry);
+  list.Remove(row);
+  UpdateProgramsHeight();
+  UpdateSelection();
+  Log("Ausgeblendet: "+entry.Name+" (Rechtsklick in die Liste zeigt es wieder an; gespeicherte Positionen bleiben erhalten)");
+ }
+ void ShowHiddenPrograms() {
+  if(busy)return;
+  var back=HiddenBuiltIns();
+  if(back.Count==0)return;
+  var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+  var ids=Store.HiddenIds(copy);
+  foreach(var e in back)ids.Remove(e.Id);
+  Store.SetHiddenIds(copy,ids);
+  try {Store.Write(Store.Profiles,copy);}
+  catch(Exception ex) {Log("Ausgeblendete Programme konnten nicht angezeigt werden – "+ex.Message);return;}
+  profiles=copy;
+  foreach(var e in back) {
+   // An der ursprünglichen Stelle einfügen (Reihenfolge der fest eingebauten Programme, eigene danach).
+   int pos=entries.Count(x=>!x.Custom&&builtIns.IndexOf(x)<builtIns.IndexOf(e));
+   entries.Insert(pos,e);
+   list.Insert(pos,new ProgramRow{Entry=e,Name=e.Name,Checked=false});
+  }
+  UpdateProgramsHeight();
+  UpdateSelection();
+  Log("Wieder angezeigt: "+String.Join(", ",back.Select(x=>x.Name).ToArray()));
  }
  void RemoveProgram(ProgramRow row) {
   if(busy)return;

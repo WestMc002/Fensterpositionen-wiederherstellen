@@ -1,6 +1,6 @@
 FENSTERPOSITIONEN
 ================
-Version 2.22 (Build-Datum wird angehängt, z.B. 2.22.2026.1101)
+Version 2.23 (Build-Datum wird angehängt, z.B. 2.23.2026.1101)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -211,6 +211,16 @@ Dabei werden auch weitere offene Easy2Sync-Fenster (z.B. das Fenster
 Position beim Schließen selbst. Ist das Fenster gerade nicht offen, bleibt es
 unverändert; dann beim nächsten Mal mit offenem Fenster erneut klicken.
 
+Programme ausblenden
+--------------------
+Fest eingebaute Programme (Task-Manager, DU Meter, Franz, TeamSpeak 3/6,
+Discord, Easy2Sync, GPU-Z), die auf dem Rechner nicht installiert sind und
+nicht laufen, erscheinen nicht in der Liste (steht beim Start im Protokoll).
+Installierte, aber nicht benötigte Programme: Rechtsklick auf die Zeile >
+"… ausblenden". Gespeicherte Positionen bleiben dabei erhalten.
+Wieder anzeigen: Rechtsklick in die Liste > "Ausgeblendete wieder anzeigen".
+Die Auswahl wird in Positionen.json gespeichert (_hidden).
+
 Eigene Programme hinzufügen
 ---------------------------
 Über "Programm hinzufügen" (oben rechts in der Programmliste) lässt sich
@@ -306,6 +316,8 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.23           Fest eingebaute Programme, die nicht installiert sind, werden nicht
+               angezeigt; andere per Rechtsklick ausblenden und wieder anzeigen.
 2.22           Screenshots für GitHub nach den globalen Vorgaben: --screenshots
                statt --preview, echte Fenster vor schwarzem/weißem Hintergrund
                (runde Ecken und Schatten), nur auf Nachfrage beim Erstellen,

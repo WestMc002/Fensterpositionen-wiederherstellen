@@ -37,6 +37,21 @@ public static class Store {
  // Früherer Ordner bis Version 2.12; wird beim ersten Start einmalig kopiert und bleibt unverändert liegen.
  public static readonly string OldRoot=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"WestMc","Fensterpositionen");
  public const string CustomKey="_custom";
+ // Ausgeblendete fest eingebaute Programme (Ids), gespeichert in Positionen.json.
+ public const string HiddenKey="_hidden";
+ public static HashSet<string> HiddenIds(Dictionary<string,object> profiles) {
+  var result=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  if(profiles==null||!profiles.ContainsKey(HiddenKey))return result;
+  var items=profiles[HiddenKey] as System.Collections.IEnumerable;
+  if(items!=null)foreach(object item in items)if(item!=null)result.Add(Convert.ToString(item));
+  return result;
+ }
+ public static void SetHiddenIds(Dictionary<string,object> profiles,IEnumerable<string> ids) {
+  var list=new List<object>();
+  foreach(string id in ids)list.Add(id);
+  if(list.Count==0)profiles.Remove(HiddenKey);
+  else profiles[HiddenKey]=list;
+ }
  // Pfad für Anzeige und Protokoll ohne Benutzernamen: C:\Users\<Name>\AppData\Local -> %LOCALAPPDATA%.
  public static string Display(string path) {
   if(String.IsNullOrEmpty(path))return path;
