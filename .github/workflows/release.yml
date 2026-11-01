@@ -6,6 +6,11 @@
 # durch Punkte, in der ZIP bleibt der Name erhalten). Existiert das Release zur
 # Version schon mit der ZIP-Datei, passiert nichts; fehlt die ZIP-Datei (aeltere
 # Releases mit einzelner EXE), wird sie ergaenzt und die alten Dateien entfernt.
+#
+# Release-Seite: oben "Änderungen" mit den Punkten aus dem Commit-Text
+# (Zeilen mit "- " im Text unter der ersten Zeile; ohne solche Zeilen der Text
+# als Absatz, ohne Text die erste Zeile), darunter die Installation. Fehlen die
+# "Änderungen" bei einem vorhandenen Release, werden sie nachgetragen.
 
 name: Release
 
@@ -15,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version, z. B. 2.19.2026.1031'
+        description: 'Version, z. B. 2.21.2026.1031'
         required: true
 
 permissions:
@@ -28,6 +33,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Version lesen
         id: ver
@@ -39,9 +46,54 @@ jobs:
           "ver=$ver" >> $env:GITHUB_OUTPUT
           $assets = gh release view "v$ver" --json assets --jq '.assets[].name' 2>$null
           if($LASTEXITCODE -ne 0) { "exists=0" >> $env:GITHUB_OUTPUT; "release=0" >> $env:GITHUB_OUTPUT }
-          elseif($assets -contains "Fensterpositionen-wiederherstellen-$ver.zip") { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits" }
+          elseif($assets -contains "Fensterpositionen-wiederherstellen-$ver.zip") {
+            "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits"
+            $body = gh release view "v$ver" --json body --jq '.body'
+            if(($body -join "`n") -notmatch '## Änderungen') { "update_notes=1" >> $env:GITHUB_OUTPUT; Write-Host "Änderungen fehlen - werden nachgetragen" }
+          }
           else { "exists=0" >> $env:GITHUB_OUTPUT; "release=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver ohne ZIP-Datei - wird ergaenzt" }
           exit 0
+
+      - name: Release-Notizen erstellen
+        if: steps.ver.outputs.exists == '0' || steps.ver.outputs.update_notes == '1'
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.ver }}'
+          # Commit des Releases: bei vorhandenem Release dessen Tag, sonst der aktuelle Stand.
+          $sha = $env:GITHUB_SHA
+          git rev-parse -q --verify "refs/tags/v$ver" *> $null
+          if($LASTEXITCODE -eq 0) { $sha = git rev-list -n 1 "v$ver" }
+          $lines = @(git log -1 --format=%B $sha)
+          $subject = $lines[0].Trim()
+          $body = @($lines | Select-Object -Skip 1 | ForEach-Object { $_.TrimEnd() })
+          $bullets = @($body | Where-Object { $_ -match '^\s*[-*] ' } | ForEach-Object { '- ' + ($_ -replace '^\s*[-*] ','') })
+          if($bullets.Count -gt 0) { $changes = $bullets -join "`n" }
+          else {
+            $text = (($body | Where-Object { $_ -ne '' }) -join ' ').Trim()
+            if(-not $text) { $text = $subject }
+            $changes = "- $text"
+          }
+          $zip = "Fensterpositionen-wiederherstellen-$ver.zip"
+          $notes = @"
+          ## Änderungen
+
+          $changes
+
+          ## Installation
+
+          ``$zip`` herunterladen, in einen beliebigen Ordner entpacken und ``Fensterpositionen wiederherstellen.exe`` per Doppelklick starten. Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).
+
+          Bei einem Update die vorhandene EXE einfach ersetzen. Gespeicherte Positionen liegen unter ``%LOCALAPPDATA%\Fensterpositionen wiederherstellen`` und bleiben erhalten.
+
+          **Installation (English):** download ``$zip``, extract it to any folder and start ``Fensterpositionen wiederherstellen.exe`` with a double-click. Requires Windows 10 or 11 with .NET Framework 4.x. To update, simply replace the existing EXE.
+          "@
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
+          Get-Content notes.md
+
+      - name: Änderungen nachtragen
+        if: steps.ver.outputs.update_notes == '1'
+        shell: pwsh
+        run: gh release edit "v${{ steps.ver.outputs.ver }}" --notes-file notes.md
 
       - name: Kompilieren
         if: steps.ver.outputs.exists == '0'
@@ -72,20 +124,13 @@ jobs:
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.ver }}'
-          $notes = @"
-          **Installation:** ``Fensterpositionen-wiederherstellen-$ver.zip`` herunterladen, in einen beliebigen Ordner entpacken und ``Fensterpositionen wiederherstellen.exe`` per Doppelklick starten. Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).
-
-          Bei einem Update die vorhandene EXE einfach ersetzen. Gespeicherte Positionen liegen unter ``%LOCALAPPDATA%\Fensterpositionen wiederherstellen`` und bleiben erhalten.
-
-          **Installation (English):** download ``Fensterpositionen-wiederherstellen-$ver.zip``, extract it to any folder and start ``Fensterpositionen wiederherstellen.exe`` with a double-click. Requires Windows 10 or 11 with .NET Framework 4.x. To update, simply replace the existing EXE.
-          "@
           $zip = "Fensterpositionen-wiederherstellen-$ver.zip"
           if('${{ steps.ver.outputs.release }}' -eq '1') {
             gh release upload "v$ver" $zip --clobber
             foreach($name in (gh release view "v$ver" --json assets --jq '.assets[].name')) {
               if($name -ne $zip) { gh release delete-asset "v$ver" $name -y }
             }
-            gh release edit "v$ver" --notes $notes
+            gh release edit "v$ver" --notes-file notes.md
           } else {
-            gh release create "v$ver" $zip --title "Fensterpositionen wiederherstellen $ver" --notes $notes --target $env:GITHUB_SHA
+            gh release create "v$ver" $zip --title "Fensterpositionen wiederherstellen $ver" --notes-file notes.md --target $env:GITHUB_SHA
           }
