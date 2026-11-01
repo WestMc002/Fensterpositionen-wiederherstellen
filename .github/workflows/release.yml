@@ -88,11 +88,11 @@ jobs:
 
           ## Installation
 
-          ``$zip`` herunterladen, in einen beliebigen Ordner entpacken und ``Fensterpositionen wiederherstellen.exe`` per Doppelklick starten. Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).
+          1. ``$zip`` herunterladen.
+          2. In einen beliebigen Ordner entpacken.
+          3. ``Fensterpositionen wiederherstellen.exe`` per Doppelklick starten.
 
-          Bei einem Update die vorhandene EXE einfach ersetzen. Gespeicherte Positionen liegen unter ``%LOCALAPPDATA%\Fensterpositionen wiederherstellen`` und bleiben erhalten.
-
-          **Installation (English):** download ``$zip``, extract it to any folder and start ``Fensterpositionen wiederherstellen.exe`` with a double-click. Requires Windows 10 or 11 with .NET Framework 4.x. To update, simply replace the existing EXE.
+          Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten). Bei einem Update die vorhandene EXE einfach ersetzen; gespeicherte Positionen unter ``%LOCALAPPDATA%\Fensterpositionen wiederherstellen`` bleiben erhalten. Ausführliche Beschreibung in ``Anleitung.txt`` im ZIP.
           "@
           Set-Content -Path notes.md -Value $notes -Encoding utf8
           Get-Content notes.md
