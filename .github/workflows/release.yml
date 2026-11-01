@@ -11,6 +11,8 @@
 # (Zeilen mit "- " im Text unter der ersten Zeile; ohne solche Zeilen der Text
 # als Absatz, ohne Text die erste Zeile), darunter die Installation. Fehlen die
 # "Änderungen" bei einem vorhandenen Release, werden sie nachgetragen.
+# Mit "Run workflow" und "Nur Notizen neu" werden die Notizen eines vorhandenen
+# Releases aus dem neuesten Commit-Text neu geschrieben (EXE bleibt unverändert).
 
 name: Release
 
@@ -22,6 +24,10 @@ on:
       version:
         description: 'Version, z. B. 2.21.2026.1031'
         required: true
+      notes:
+        description: 'Nur Notizen neu (aus dem neuesten Commit-Text)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -49,7 +55,8 @@ jobs:
           elseif($assets -contains "Fensterpositionen-wiederherstellen-$ver.zip") {
             "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits"
             $body = gh release view "v$ver" --json body --jq '.body'
-            if(($body -join "`n") -notmatch '## Änderungen') { "update_notes=1" >> $env:GITHUB_OUTPUT; Write-Host "Änderungen fehlen - werden nachgetragen" }
+            if('${{ github.event.inputs.notes }}' -eq 'true') { "update_notes=1" >> $env:GITHUB_OUTPUT; "use_head=1" >> $env:GITHUB_OUTPUT; Write-Host "Notizen werden aus dem neuesten Commit neu geschrieben" }
+            elseif(($body -join "`n") -notmatch '## Änderungen') { "update_notes=1" >> $env:GITHUB_OUTPUT; Write-Host "Änderungen fehlen - werden nachgetragen" }
           }
           else { "exists=0" >> $env:GITHUB_OUTPUT; "release=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver ohne ZIP-Datei - wird ergaenzt" }
           exit 0
@@ -62,7 +69,7 @@ jobs:
           # Commit des Releases: bei vorhandenem Release dessen Tag, sonst der aktuelle Stand.
           $sha = $env:GITHUB_SHA
           git rev-parse -q --verify "refs/tags/v$ver" *> $null
-          if($LASTEXITCODE -eq 0) { $sha = git rev-list -n 1 "v$ver" }
+          if($LASTEXITCODE -eq 0 -and '${{ steps.ver.outputs.use_head }}' -ne '1') { $sha = git rev-list -n 1 "v$ver" }
           $lines = @(git log -1 --format=%B $sha)
           $subject = $lines[0].Trim()
           $body = @($lines | Select-Object -Skip 1 | ForEach-Object { $_.TrimEnd() })
