@@ -23,3 +23,6 @@ Positionen.json
 # Windows
 Thumbs.db
 desktop.ini
+
+# Fehlerprotokoll der automatischen Screenshots
+Screenshots/Fehler.txt

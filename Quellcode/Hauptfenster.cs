@@ -21,7 +21,7 @@ using System.Drawing.Drawing2D;
 
 namespace Fensterpositionen {
 public class MainForm:Form {
- // Demo-Ansicht für die Vorschaubilder (--preview): ohne eigene Programme und ohne Datenübernahme.
+ // Demo-Ansicht für die Screenshots (--screenshots): ohne eigene Programme und ohne Datenübernahme.
  public static bool DemoMode;
  ProgramList list=new ProgramList();
  ModernButton restore,save,all,folder,align,edges,admin,addProgram;
@@ -37,7 +37,9 @@ public class MainForm:Form {
  Dictionary<string,object> profiles;
  bool busy;
  public MainForm() {
-  Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath); Text=AppInfo.Product+" "+AppInfo.Version+(IsElevated()?" (Administrator)":"");
+  // Screenshots (Demo-Ansicht): kein Administrator-Hinweis, auch wenn Erstellen.bat erhöht läuft.
+  bool elevated=!DemoMode&&IsElevated();
+  Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath); Text=AppInfo.Product+" "+AppInfo.Version+(elevated?" (Administrator)":"");
   AutoScaleMode=AutoScaleMode.None; Font=Ui.UiFont; BackColor=Ui.Bg; ForeColor=Ui.TextColor;
   StartPosition=FormStartPosition.CenterScreen;
   // Einstellungen aus dem alten Ordner (bis Version 2.12) einmalig übernehmen.
@@ -62,7 +64,7 @@ public class MainForm:Form {
   // Globale Richtlinie: links "© <Jahr> · <Programmname>".
   footer.Caption="© "+DateTime.Now.Year+" · "+AppInfo.Product;
   header.Controls.Add(folder);
-  if(!IsElevated()) {
+  if(!elevated) {
    // Manche Programme (z.B. Easy2Sync) laufen mit Administratorrechten; ihre Fenster lassen sich nur mit gleichen Rechten verschieben.
    admin=new ModernButton("Als Administrator",ButtonKind.Secondary,"\uE7EF");
    admin.Margin=new Padding(0);
@@ -220,21 +222,6 @@ public class MainForm:Form {
   return System.IO.File.Exists(inResources)?inResources:Path.Combine(AppDomain.CurrentDomain.BaseDirectory,name);
  }
  // Signatur-Logo: eingebettet (Erstellen.bat) oder Datei GS-Logo.png neben der EXE.
- // Programm-Icon in einer bestimmten Größe (für die Titelleiste der Vorschaubilder).
- internal static Bitmap IconImage(int size) {
-  try {
-   byte[] data=null;
-   using(var stream=ResourceStream("Fensterpositionen.ico")) {
-    if(stream!=null){var memory=new MemoryStream();stream.CopyTo(memory);data=memory.ToArray();}
-   }
-   if(data==null) {
-    string ico=ProjectFile("Fensterpositionen.ico");
-    if(System.IO.File.Exists(ico))data=System.IO.File.ReadAllBytes(ico);
-   }
-   if(data!=null)return IconFrame(data,size);
-  } catch {}
-  return null;
- }
  internal static Bitmap LoadSignature() {
   try {
    using(var stream=ResourceStream("GS-Logo.png")) {
@@ -284,7 +271,7 @@ public class MainForm:Form {
   using(var stream=new MemoryStream(data))
   using(var icon=new Icon(stream,bestSize,bestSize)) return icon.ToBitmap();
  }
- // Demo-Ablauf für die Vorschaubilder: eigenes Programm hinzugefügt, danach "Unten ausrichten" für einige Programme.
+ // Demo-Ablauf für die Screenshots: eigenes Programm hinzugefügt, danach "Unten ausrichten" für einige Programme.
  internal void DemoRun() {
   var demo=new Entry{Id="eigen-notepad",Name="Editor",ProcessName="notepad",Exe=@"C:\Windows\System32\notepad.exe",WindowOnly=true,Custom=true,Keys=new[]{"Window"}};
   entries.Add(demo);

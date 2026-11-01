@@ -6,7 +6,7 @@ ECHO #                                     #
 ECHO #  Autor: Guenther Schoder            #
 ECHO #         www.westmc002.de            #
 ECHO #                                     #
-ECHO #  Datum: 29.10.2026 / 31.10.2026     #
+ECHO #  Datum: 29.10.2026 / 01.11.2026     #
 ECHO #######################################
 ECHO.
 
@@ -88,21 +88,16 @@ COLOR A0
 ECHO Erfolgreich erstellt: %EXE% (Version %VER%)
 
 REM Optionale projektspezifische Zusatzschritte hier einfuegen
-REM (z. B. Vorschaubilder hell/dunkel nach Design\Vorschau: START "" /WAIT "%EXE%" --preview)
-REM Vorschaubilder (hell/dunkel) im Ordner Design\Vorschau erzeugen:
-REM Hauptfenster, Ablauf (Demo), Info-Fenster und Dialog "Programm hinzufuegen"
-START "" /WAIT "%EXE%" --preview
-IF EXIST "Design\Vorschau\Vorschau-hell.png" ECHO Vorschau: Design\Vorschau\Vorschau-hell.png und Vorschau-dunkel.png
-REM Dieselben Bilder (Demo-Ansicht ohne Benutzerdaten) als Screenshots fuer GitHub (README.md)
-IF NOT EXIST "Screenshots" MKDIR "Screenshots"
-IF EXIST "Design\Vorschau\Vorschau-hell.png" COPY /Y "Design\Vorschau\Vorschau-hell.png" "Screenshots\hell.png" >NUL
-IF EXIST "Design\Vorschau\Vorschau-dunkel.png" COPY /Y "Design\Vorschau\Vorschau-dunkel.png" "Screenshots\dunkel.png" >NUL
-IF EXIST "Design\Vorschau\Ablauf-hell.png" COPY /Y "Design\Vorschau\Ablauf-hell.png" "Screenshots\ablauf-hell.png" >NUL
-IF EXIST "Design\Vorschau\Ablauf-dunkel.png" COPY /Y "Design\Vorschau\Ablauf-dunkel.png" "Screenshots\ablauf-dunkel.png" >NUL
-IF EXIST "Design\Vorschau\Info-hell.png" COPY /Y "Design\Vorschau\Info-hell.png" "Screenshots\info-hell.png" >NUL
-IF EXIST "Design\Vorschau\Info-dunkel.png" COPY /Y "Design\Vorschau\Info-dunkel.png" "Screenshots\info-dunkel.png" >NUL
-IF EXIST "Design\Vorschau\Hinzufuegen-hell.png" COPY /Y "Design\Vorschau\Hinzufuegen-hell.png" "Screenshots\hinzufuegen-hell.png" >NUL
-IF EXIST "Design\Vorschau\Hinzufuegen-dunkel.png" COPY /Y "Design\Vorschau\Hinzufuegen-dunkel.png" "Screenshots\hinzufuegen-dunkel.png" >NUL
+REM Screenshots fuer GitHub aus Beispieldaten (hell und dunkel) nach Screenshots,
+REM nur auf Nachfrage: ohne Antwort nach 10 Sekunden Nein, bei /nopause nie
+IF /I "%~1"=="/nopause" GOTO :NOSHOTS
+ECHO.
+CHOICE /C JN /T 10 /D N /M "Screenshots fuer GitHub erstellen (nach 10 s automatisch Nein)"
+IF ERRORLEVEL 2 GOTO :NOSHOTS
+ECHO Erstelle Screenshots (bitte Maus und Tastatur kurz nicht benutzen) ...
+START "" /WAIT "%EXE%" --screenshots "%CD%\Screenshots"
+IF ERRORLEVEL 1 (ECHO Hinweis: Screenshots fehlgeschlagen - siehe Screenshots\Fehler.txt) ELSE (ECHO Screenshots erstellt.)
+:NOSHOTS
 
 REM Sicherung: komplettes Projekt nach Backup\<Projekt> v<Version>
 SET "BAKDIR=Backup\%NAME% v%VER%"

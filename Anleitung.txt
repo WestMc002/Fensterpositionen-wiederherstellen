@@ -1,6 +1,6 @@
 FENSTERPOSITIONEN
 ================
-Version 2.21 (Build-Datum wird angehängt, z.B. 2.21.2026.1031)
+Version 2.22 (Build-Datum wird angehängt, z.B. 2.22.2026.1101)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -84,16 +84,17 @@ Quellcode         Fensterpositionen.cs   Programmstart, Name, EXE-Angaben
                   Oberflaeche.cs         Farben, Schriften, Steuerelemente
                   Ausrichten.cs          Fenster messen, ausrichten, verschieben
                   Speicher.cs            Positionen, Sicherungen, Protokoll, Selbsttest
+                  Demo.cs                Screenshots für GitHub (--screenshots)
                   VersionInfo.cs         von Erstellen.bat erzeugt
 Resources         Fensterpositionen.ico, GS-Logo.png, Startwerte.json
                   (wird vom Programm gebraucht oder eingebettet)
 Design            nur Entwürfe und Bilder, vom Programm nicht gebraucht:
   Icon-Vorschläge   Icon-Entwürfe (ICO, SVG, Übersichtsbild)
-  Vorschau          Vorschaubilder hell/dunkel (von Erstellen.bat erzeugt)
+  Vorschau          frühere Vorschaubilder (werden nicht mehr erzeugt)
 Backup            Sicherung des ganzen Projekts je Version
 Screenshots       Bilder für GitHub (README.md), paarweise hell/dunkel:
                   hell/dunkel (Hauptfenster), ablauf-, hinzufuegen- und info-;
-                  kopiert Erstellen.bat aus Design\Vorschau
+                  erzeugt das Programm auf Nachfrage beim Erstellen
 Im Projektordner selbst liegen nur Erstellen.bat, die EXE, Anleitung.txt,
 README.md, .gitignore und die Ordner (Erstellen.log entsteht beim Erstellen).
 Zusätzlich bleibt bewusst die Verknüpfung "Fensterpositionen wiederherstellen.lnk" dort.
@@ -246,14 +247,21 @@ Nicht hochgeladen werden Backup, Design, die EXE, Erstellen.log, die
 Verknüpfung (.lnk) und Resources\Startwerte.json; das regelt die Datei
 .gitignore. Startwerte.json enthält die Fensterkoordinaten des eigenen
 Monitor-Aufbaus und bleibt nur im Projektordner.
-Die Vorschaubilder zeigen eine Demo-Ansicht: ohne eigene Programme und mit
-%LOCALAPPDATA% statt des Benutzerordners. Auch das Protokoll zeigt Pfade so an.
-Erzeugt werden je hell und dunkel: Hauptfenster, ein Demo-Ablauf (eigenes
-Programm hinzugefügt, Fenster ausgerichtet), das Info-Fenster und der Dialog
-"Programm hinzufügen" mit einer festen Demo-Liste statt der offenen Fenster.
-Das Rechtsklick-Menü ist nicht dabei (lässt sich unsichtbar nicht aufnehmen).
-Downloads (Releases) baut GitHub automatisch, sobald eine neue Version
-mit einem Versions-Tag (z.B. v2.21.2026.1031) hochgeladen wird.
+Screenshots: "Fensterpositionen wiederherstellen.exe" --screenshots [Zielordner]
+(Standard: Ordner Screenshots neben der EXE). Erstellen.bat fragt danach
+(Standard Nein nach 10 Sekunden, bei /nopause nie). Die Fenster werden dabei
+kurz in der Mitte des Hauptbildschirms angezeigt und je einmal vor schwarzem
+und weißem Hintergrund aufgenommen; daraus entstehen runde, durchsichtige Ecken
+und der Windows-Schatten. Maus und Tastatur währenddessen nicht benutzen.
+Die Bilder zeigen eine Demo-Ansicht: ohne eigene Programme, ohne
+Administrator-Hinweis und mit %LOCALAPPDATA% statt des Benutzerordners. Auch
+das Protokoll zeigt Pfade so an. Erzeugt werden je hell und dunkel:
+Hauptfenster, ein Demo-Ablauf (eigenes Programm hinzugefügt, Fenster
+ausgerichtet), das Info-Fenster und der Dialog "Programm hinzufügen" mit einer
+festen Demo-Liste statt der offenen Fenster. Fehler stehen in
+Screenshots\Fehler.txt (wird nicht hochgeladen).
+Downloads (Releases) baut GitHub automatisch als ZIP mit der EXE und dieser
+Anleitung; die Release-Seite zeigt oben die Änderungen der Version.
 
 Info und Signatur
 -----------------
@@ -287,8 +295,8 @@ Ablauf:
 3. Hat die bisherige EXE noch keinen Ordner in Backup, wird sie dorthin
    verschoben (Ordner "<Name> v<alte Version>").
 4. Die neue EXE wird zu "Fensterpositionen wiederherstellen.exe".
-5. Vorschaubilder hell/dunkel werden im Ordner Design\Vorschau erzeugt.
-6. Das gesamte Projekt (EXE, Quellcode, Icons, Anleitung, Vorschau usw.)
+5. Auf Nachfrage werden die Screenshots für GitHub erzeugt (siehe oben).
+6. Das gesamte Projekt (EXE, Quellcode, Icons, Anleitung, Screenshots usw.)
    wird nach "Backup\Fensterpositionen wiederherstellen v<Version>" kopiert,
    z.B. "Backup\Fensterpositionen wiederherstellen v2.2.2026.1029".
    Ausgenommen sind der Ordner Backup selbst und Erstellen.log.
@@ -298,6 +306,10 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.22           Screenshots für GitHub nach den globalen Vorgaben: --screenshots
+               statt --preview, echte Fenster vor schwarzem/weißem Hintergrund
+               (runde Ecken und Schatten), nur auf Nachfrage beim Erstellen,
+               ohne Administrator-Hinweis; Fehler in Screenshots\Fehler.txt.
 2.19 bis 2.21  Vorbereitung für GitHub: README.md, .gitignore, Lizenzkopf (GPL v3)
                in allen Quelldateien, Screenshots hell/dunkel aus der Vorschau
                (Hauptfenster, Demo-Ablauf, Info-Fenster, "Programm hinzufügen").

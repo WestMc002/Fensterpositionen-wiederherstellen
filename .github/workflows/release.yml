@@ -1,33 +1,24 @@
 # Fensterpositionen wiederherstellen - automatische Bereitstellung der EXE
-# Baut das Programm, sobald ein Versions-Tag v<Version> (z. B. v2.21.2026.1031)
-# hochgeladen wird (oder per Hand ueber "Run workflow" mit der Version), und legt
-# ein Release mit einer ZIP-Datei an: "Fensterpositionen wiederherstellen.exe"
-# und Anleitung.txt (GitHub ersetzt Leerzeichen in einzeln hochgeladenen Dateien
-# durch Punkte, in der ZIP bleibt der Name erhalten). Existiert das Release zur
-# Version schon mit der ZIP-Datei, passiert nichts; fehlt die ZIP-Datei (aeltere
-# Releases mit einzelner EXE), wird sie ergaenzt und die alten Dateien entfernt.
-#
-# Release-Seite: oben "Änderungen" mit den Punkten aus dem Commit-Text
-# (Zeilen mit "- " im Text unter der ersten Zeile; ohne solche Zeilen der Text
-# als Absatz, ohne Text die erste Zeile), darunter die Installation. Fehlen die
-# "Änderungen" bei einem vorhandenen Release, werden sie nachgetragen.
-# Mit "Run workflow" und "Nur Notizen neu" werden die Notizen eines vorhandenen
-# Releases aus dem neuesten Commit-Text neu geschrieben (EXE bleibt unverändert).
+# Baut "Fensterpositionen wiederherstellen.exe" mit csc aus .NET Framework 4 (wie Erstellen.bat),
+# packt sie mit Anleitung.txt als ZIP (GitHub ersetzt Leerzeichen in Dateinamen von Release-Anhängen
+# durch Punkte, im ZIP bleibt der Originalname erhalten) und legt das Release v<Version> an.
+# Release-Seite: oben "Änderungen" (Zeilen mit "- " aus dem neuesten Commit, dessen Text die
+# Versionsnummer nennt), darunter die Installation.
+# Gibt es das Release zur Version schon, wird nichts neu gebaut; nur der Release-Text wird aufgefrischt.
+# Auslöser: "Run workflow" mit Versionsnummer oder Änderung dieser Datei auf main
+# (dann gilt die Version aus dem neuesten Commit-Text "Fensterpositionen wiederherstellen <Version>").
 
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: ['.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version, z. B. 2.21.2026.1031'
+        description: 'Version, z. B. 2.22.2026.1101'
         required: true
-      notes:
-        description: 'Nur Notizen neu (aus dem neuesten Commit-Text)'
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -40,104 +31,91 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # ganze Historie, um den Commit zur Version zu finden
 
-      - name: Version lesen
+      - name: Version bestimmen
         id: ver
         shell: pwsh
         run: |
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
           $ver = '${{ github.event.inputs.version }}'
-          if(-not $ver) { $ver = '${{ github.ref_name }}'.TrimStart('v') }
-          if($ver -notmatch '^\d+\.\d+\.\d{4}\.\d{4}$') { throw "Ungueltige Version: $ver" }
-          "ver=$ver" >> $env:GITHUB_OUTPUT
-          $assets = gh release view "v$ver" --json assets --jq '.assets[].name' 2>$null
-          if($LASTEXITCODE -ne 0) { "exists=0" >> $env:GITHUB_OUTPUT; "release=0" >> $env:GITHUB_OUTPUT }
-          elseif($assets -contains "Fensterpositionen-wiederherstellen-$ver.zip") {
-            "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits"
-            $body = gh release view "v$ver" --json body --jq '.body'
-            if('${{ github.event.inputs.notes }}' -eq 'true') { "update_notes=1" >> $env:GITHUB_OUTPUT; "use_head=1" >> $env:GITHUB_OUTPUT; Write-Host "Notizen werden aus dem neuesten Commit neu geschrieben" }
-            elseif(($body -join "`n") -notmatch '## Änderungen') { "update_notes=1" >> $env:GITHUB_OUTPUT; Write-Host "Änderungen fehlen - werden nachgetragen" }
+          if(-not $ver) {
+            $text = (git log --format=%B -n 200) -join "`n"
+            if($text -match 'Fensterpositionen wiederherstellen v?(\d+\.\d+\.\d{4}\.\d{4})') { $ver = $Matches[1] }
           }
-          else { "exists=0" >> $env:GITHUB_OUTPUT; "release=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver ohne ZIP-Datei - wird ergaenzt" }
+          $ver = "$ver".TrimStart('v')
+          if($ver -notmatch '^\d+\.\d+\.\d{4}\.\d{4}$') { throw "Ungültige Version: $ver" }
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          gh release view "v$ver" *> $null
+          if($LASTEXITCODE -eq 0) { "exists=true" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits - nur der Text wird aufgefrischt." }
+          else { "exists=false" >> $env:GITHUB_OUTPUT }
           exit 0
 
-      - name: Release-Notizen erstellen
-        if: steps.ver.outputs.exists == '0' || steps.ver.outputs.update_notes == '1'
-        shell: pwsh
-        run: |
-          $ver = '${{ steps.ver.outputs.ver }}'
-          # Commit des Releases: bei vorhandenem Release dessen Tag, sonst der aktuelle Stand.
-          $sha = $env:GITHUB_SHA
-          git rev-parse -q --verify "refs/tags/v$ver" *> $null
-          if($LASTEXITCODE -eq 0 -and '${{ steps.ver.outputs.use_head }}' -ne '1') { $sha = git rev-list -n 1 "v$ver" }
-          $lines = @(git log -1 --format=%B $sha)
-          $subject = $lines[0].Trim()
-          $body = @($lines | Select-Object -Skip 1 | ForEach-Object { $_.TrimEnd() })
-          $bullets = @($body | Where-Object { $_ -match '^\s*[-*] ' } | ForEach-Object { '- ' + ($_ -replace '^\s*[-*] ','') })
-          if($bullets.Count -gt 0) { $changes = $bullets -join "`n" }
-          else {
-            $text = (($body | Where-Object { $_ -ne '' }) -join ' ').Trim()
-            if(-not $text) { $text = $subject }
-            $changes = "- $text"
-          }
-          $zip = "Fensterpositionen-wiederherstellen-$ver.zip"
-          $notes = @"
-          ## Änderungen
-
-          $changes
-
-          ## Installation
-
-          1. ``$zip`` herunterladen.
-          2. In einen beliebigen Ordner entpacken.
-          3. ``Fensterpositionen wiederherstellen.exe`` per Doppelklick starten.
-
-          Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten). Bei einem Update die vorhandene EXE einfach ersetzen; gespeicherte Positionen unter ``%LOCALAPPDATA%\Fensterpositionen wiederherstellen`` bleiben erhalten. Ausführliche Beschreibung in ``Anleitung.txt`` im ZIP.
-          "@
-          Set-Content -Path notes.md -Value $notes -Encoding utf8
-          Get-Content notes.md
-
-      - name: Änderungen nachtragen
-        if: steps.ver.outputs.update_notes == '1'
-        shell: pwsh
-        run: gh release edit "v${{ steps.ver.outputs.ver }}" --notes-file notes.md
-
       - name: Kompilieren
-        if: steps.ver.outputs.exists == '0'
+        if: steps.ver.outputs.exists == 'false'
         shell: pwsh
         run: |
-          $ver = '${{ steps.ver.outputs.ver }}'
+          $ver = '${{ steps.ver.outputs.version }}'
           @(
-            "[assembly: System.Reflection.AssemblyVersion(`"$ver`")]"
-            "[assembly: System.Reflection.AssemblyFileVersion(`"$ver`")]"
-            "[assembly: System.Reflection.AssemblyInformationalVersion(`"$ver`")]"
-            "namespace Fensterpositionen { public static partial class AppInfo { public const string Version = `"$ver`"; } }"
-          ) | Set-Content Quellcode\VersionInfo.cs -Encoding utf8
-          New-Item -ItemType Directory -Force Bin | Out-Null
+            "[assembly: System.Reflection.AssemblyVersion(""$ver"")]"
+            "[assembly: System.Reflection.AssemblyFileVersion(""$ver"")]"
+            "[assembly: System.Reflection.AssemblyInformationalVersion(""$ver"")]"
+            "namespace Fensterpositionen { public static partial class AppInfo { public const string Version = ""$ver""; } }"
+          ) | Set-Content -Path 'Quellcode\VersionInfo.cs' -Encoding utf8
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          & $csc /nologo /target:winexe /optimize+ /codepage:65001 "/out:Bin\Fensterpositionen wiederherstellen.exe" `
+          if(-not (Test-Path $csc)) { $csc = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
+          & $csc /nologo /target:winexe /optimize+ /codepage:65001 "/out:Fensterpositionen wiederherstellen.exe" `
             "/win32icon:Resources\Fensterpositionen.ico" `
             "/resource:Resources\Fensterpositionen.ico,Fensterpositionen.ico" `
             "/resource:Resources\GS-Logo.png,GS-Logo.png" `
             /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
             /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll Quellcode\*.cs
           if($LASTEXITCODE -ne 0) { throw 'Kompilieren fehlgeschlagen' }
-          (Get-Item "Bin\Fensterpositionen wiederherstellen.exe").VersionInfo.FileVersion
-          Copy-Item Anleitung.txt Bin\Anleitung.txt
-          Compress-Archive -Path "Bin\Fensterpositionen wiederherstellen.exe",Bin\Anleitung.txt -DestinationPath "Fensterpositionen-wiederherstellen-$ver.zip"
+          (Get-Item 'Fensterpositionen wiederherstellen.exe').VersionInfo.FileVersion
 
-      - name: Release anlegen
-        if: steps.ver.outputs.exists == '0'
+      - name: ZIP packen
+        if: steps.ver.outputs.exists == 'false'
         shell: pwsh
         run: |
-          $ver = '${{ steps.ver.outputs.ver }}'
-          $zip = "Fensterpositionen-wiederherstellen-$ver.zip"
-          if('${{ steps.ver.outputs.release }}' -eq '1') {
-            gh release upload "v$ver" $zip --clobber
-            foreach($name in (gh release view "v$ver" --json assets --jq '.assets[].name')) {
-              if($name -ne $zip) { gh release delete-asset "v$ver" $name -y }
-            }
-            gh release edit "v$ver" --notes-file notes.md
-          } else {
-            gh release create "v$ver" $zip --title "Fensterpositionen wiederherstellen $ver" --notes-file notes.md --target $env:GITHUB_SHA
-          }
+          $ver = '${{ steps.ver.outputs.version }}'
+          New-Item -ItemType Directory -Path 'paket' | Out-Null
+          Copy-Item 'Fensterpositionen wiederherstellen.exe', 'Anleitung.txt' -Destination 'paket'
+          Compress-Archive -Path 'paket\*' -DestinationPath "Fensterpositionen-wiederherstellen-$ver.zip"
+
+      - name: Release-Text erstellen
+        shell: pwsh
+        run: |
+          # "Änderungen" = Zeilen mit "- " aus dem neuesten Commit, dessen Text die Version nennt,
+          # sonst aus dem letzten Commit; darunter die Installation
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+          $ver = '${{ steps.ver.outputs.version }}'
+          $sha = git log --format=%H -F --grep="$ver" -n 1
+          if(-not $sha) { $sha = git rev-parse HEAD }
+          $body = git log -1 --format=%b $sha
+          $items = @($body -split "`r?`n" | Where-Object { $_ -match '^\s*[-*] ' } | ForEach-Object { '- ' + ($_.Trim() -replace '^[-*]\s+', '') })
+          if($items.Count -eq 0) { $items = @('- siehe Anleitung.txt') }
+          $lines = @('## Änderungen', '') + $items + @(
+            '',
+            '## Installation',
+            '',
+            "1. ``Fensterpositionen-wiederherstellen-$ver.zip`` herunterladen und in einen eigenen Ordner entpacken, z. B. ``C:\Tools\Fensterpositionen wiederherstellen``.",
+            '2. `Fensterpositionen wiederherstellen.exe` per Doppelklick starten.',
+            '3. Fenster anordnen, Programme anhaken und „Positionen speichern“ anklicken; weitere Programme über „Programm hinzufügen“ aufnehmen.',
+            '',
+            'Voraussetzung: Windows 10/11 mit .NET Framework 4 (in Windows enthalten). Gespeicherte Positionen, Sicherungen und Protokolle liegen unter `%LOCALAPPDATA%\Fensterpositionen wiederherstellen`; bei einem Update nur die EXE ersetzen. Ausführliche Beschreibung und Versionsgeschichte: `Anleitung.txt` im ZIP.'
+          )
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllLines((Join-Path $PWD 'release-notes.md'), [string[]]$lines, $utf8)
+          Get-Content 'release-notes.md'
+
+      - name: Release anlegen
+        if: steps.ver.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          gh release create "v$ver" "Fensterpositionen-wiederherstellen-$ver.zip" --title "Fensterpositionen wiederherstellen $ver" --notes-file release-notes.md --target $env:GITHUB_SHA
+
+      - name: Release-Text auffrischen
+        if: steps.ver.outputs.exists == 'true'
+        shell: pwsh
+        run: gh release edit "v${{ steps.ver.outputs.version }}" --notes-file release-notes.md

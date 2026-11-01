@@ -144,7 +144,7 @@ public class AddProgramForm:FixedSizeForm {
  void LoadWindows() {
   var choices=new List<WindowChoice>();
   if(MainForm.DemoMode) {
-   // Vorschaubilder: feste Demo-Liste statt der tatsächlich offenen Fenster (deren Titel privat sein können).
+   // Screenshots: feste Demo-Liste statt der tatsächlich offenen Fenster (deren Titel privat sein können).
    choices.Add(new WindowChoice{Title="Downloads – Datei-Explorer",Process="explorer",Exe=@"C:\Windows\explorer.exe",Description="Windows-Explorer"});
    choices.Add(new WindowChoice{Title="Paint",Process="mspaint",Exe=@"C:\Windows\System32\mspaint.exe",Description="Paint"});
    choices.Add(new WindowChoice{Title="Rechner",Process="CalculatorApp",Exe=@"C:\Program Files\WindowsApps\CalculatorApp.exe",Description="Rechner"});

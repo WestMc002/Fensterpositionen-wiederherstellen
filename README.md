@@ -55,7 +55,7 @@ Run `Erstellen.bat` in the project folder. It
 
 - compiles with the C# compiler of .NET Framework 4 (no other software needed),
 - assigns the version number automatically (Major.Minor.Year.MonthDay),
-- creates the preview images (also used as screenshots on this page),
+- on request creates the screenshots for this page from demo data (`--screenshots`),
 - backs up the project to `Backup`.
 
 Self-test: `"Fensterpositionen wiederherstellen.exe" --self-test` (works only in the temp folder, result in `%TEMP%\Fensterpositionen wiederherstellen\Testergebnis.txt`).
@@ -100,7 +100,7 @@ Ausführliche Anleitung: [Anleitung.txt](Anleitung.txt).
 
 - kompiliert mit dem C#-Compiler des .NET Framework 4 (keine weitere Software nötig),
 - vergibt die Versionsnummer automatisch (Haupt.Neben.Jahr.MonatTag),
-- erzeugt die Vorschaubilder (zugleich die Screenshots auf dieser Seite),
+- erzeugt auf Nachfrage die Screenshots für diese Seite aus Beispieldaten (`--screenshots`),
 - sichert das Projekt unter `Backup`.
 
 Selbsttest: `"Fensterpositionen wiederherstellen.exe" --self-test` (arbeitet nur im Temp-Ordner, Ergebnis in `%TEMP%\Fensterpositionen wiederherstellen\Testergebnis.txt`).
@@ -127,7 +127,7 @@ Selbsttest: `"Fensterpositionen wiederherstellen.exe" --self-test` (arbeitet nur
   <tr><td colspan="2" align="center">About window · Info-Fenster</td></tr>
 </table>
 
-The screenshots are created automatically by `Erstellen.bat` (demo view without personal data) · Die Bilder erzeugt `Erstellen.bat` automatisch (Demo-Ansicht ohne persönliche Daten).
+The screenshots are created by the program itself from demo data (`--screenshots`, without personal data) · Die Bilder erzeugt das Programm selbst aus Beispieldaten (`--screenshots`, ohne persönliche Daten).
 
 ## Project structure / Projektaufbau
 
