@@ -1,6 +1,6 @@
 FENSTERPOSITIONEN
 ================
-Version 2.23 (Build-Datum wird angehängt, z.B. 2.23.2026.1101)
+Version 2.28 (Build-Datum wird angehängt, z.B. 2.28.2026.1101)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -103,12 +103,41 @@ wie Positionen und Sicherungen unter %LOCALAPPDATA%\Fensterpositionen wiederhers
 
 Sichtbare Fensterkanten ausrichten
 ---------------------------------
-Die Funktion "Unten ausrichten (18 px)" verschiebt die ausgewählten,
+Ausrichten (zweite Schaltflächenzeile): "Oben", "Unten", "Links" und
+"Rechts" setzen die ausgewählten Fenster an die jeweilige Kante;
+"Automatisch" richtet alle Kanten, die unter "Kanten je Programm" angehakt
+sind, auf einmal aus (siehe unten).
+Rechts daneben steht der Abstand in Bildschirmpixeln (Standard 18, 0 bis 200);
+der zuletzt verwendete Wert wird gespeichert. Die folgenden Abschnitte nennen
+18 px als Beispiel. Mehrere Richtungen nacheinander ergänzen sich
+(z.B. "Unten" und danach "Links"); die Nachkorrektur beim Start übernimmt
+Kanten und Abstand.
+
+Die Schaltfläche "Unten" verschiebt die ausgewählten,
 bereits geöffneten Fenster. Sie misst die sichtbare Unterkante über DWM
 und berücksichtigt unsichtbare Windows-Fensterrahmen sowie DPI-Skalierung.
 Ziel: 18 physische Bildschirmpixel Abstand zur Unterkante des Arbeitsbereichs.
 Bei einer Taskleiste unten entspricht das dem Abstand zur Taskleiste.
-DU Meter und TeamSpeak 3 werden dabei übersprungen.
+Kanten je Programm: Über "Kanten je Programm" (rechts in der
+Ausrichten-Zeile) oder per Rechtsklick in die Liste lässt sich für jedes
+Programm, auch für eigene, festlegen, an welchen Kanten es ausgerichtet wird:
+Oben, Unten, Links, Rechts und Mitte (waagerecht mittig).
+- "Automatisch" richtet alle angehakten Kanten zusammen aus.
+  Oben + Unten = volle Höhe, Links + Rechts = volle Breite.
+  Mitte gilt nur, wenn weder Links noch Rechts angehakt ist.
+- "Oben", "Unten", "Links" und "Rechts" richten nur Programme aus, bei denen
+  diese Kante angehakt ist; die anderen zeigen "Ausrichten übersprungen".
+Vorgabe ("Standard", wie bis Version 2.23):
+  Task-Manager   Unten, Rechts
+  DU Meter       Oben, Rechts
+  Franz          Oben, Unten, Links
+  TeamSpeak 3    Oben
+  TeamSpeak 6    Oben, Unten
+  Discord        Unten, Links
+  Easy2Sync      Mitte
+  GPU-Z          Unten
+  eigene         Oben, Unten, Links, Rechts
+Gespeichert wird in Positionen.json (_edges).
 Minimierte oder maximierte Fenster müssen zuerst normal geöffnet werden.
 Fenstergrößen und horizontale Positionen bleiben erhalten.
 Die Funktion prüft die neue sichtbare Kante und meldet Abweichungen.
@@ -122,7 +151,7 @@ Oben und an den Seiten ausrichten
 1. TeamSpeak 3, TeamSpeak 6, Franz und Task-Manager normal öffnen.
 2. Diese vier Programme im Positionsprogramm auswählen
    (TeamSpeak 3 ist anfangs nicht angehakt).
-3. "Oben / Seiten (18 px)" anklicken.
+3. "Automatisch" anklicken.
    TeamSpeak 3 und 6: oben und unten 18 physische Bildschirmpixel; Höhe wird angepasst.
    Franz: oben, unten und links jeweils 18 physische Bildschirmpixel; Höhe wird angepasst.
    Task-Manager: rechts 18 physische Bildschirmpixel;
@@ -199,12 +228,12 @@ läuft Easy2Sync nicht, wird es gestartet und das Fenster danach mehrfach gesetz
 Easy2Sync merkt sich die neue Position beim nächsten Beenden selbst.
 Verwendet wird Easy2Sync64Bit.exe (falls vorhanden), sonst Easy2Sync.exe,
 aus C:\Program Files (x86)\Easy2Sync. Beide Varianten werden erkannt.
-"Unten ausrichten" funktioniert auch für Easy2Sync.
+"Oben", "Unten", "Links" und "Rechts" funktionieren auch für Easy2Sync.
 Läuft Easy2Sync mit Administratorrechten, darf ein normal gestartetes Programm
 sein Fenster nicht verschieben (Meldung "Zugriff verweigert"). Dann oben auf
 "Als Administrator" klicken; das Programm startet mit Administratorrechten neu
 (Titelleiste zeigt "(Administrator)").
-"Oben / Seiten (18 px)" setzt Easy2Sync waagerecht mittig auf seinen Bildschirm;
+"Automatisch" setzt Easy2Sync (Vorgabe: nur Mitte) waagerecht mittig;
 Größe und Höhe bleiben erhalten. Danach "Positionen speichern" anklicken.
 Dabei werden auch weitere offene Easy2Sync-Fenster (z.B. das Fenster
 "Synchronisation: ...") waagerecht mittig gesetzt. Easy2Sync merkt sich deren
@@ -233,8 +262,8 @@ Eigene Programme werden wie Easy2Sync behandelt: Sie werden nie beendet,
 "Positionen speichern" misst das offene Fenster, "Wiederherstellen" verschiebt
 es zurück. Läuft das Programm nicht, wird es gestartet (sofern der
 Programmpfad bekannt ist) und das Fenster danach gesetzt.
-"Unten ausrichten (18 px)" gilt auch für eigene Programme; bei
-"Oben / Seiten (18 px)" werden sie übersprungen.
+Ausrichten gilt auch für eigene Programme; ihre Kanten legst du unter
+"Kanten je Programm" fest (Vorgabe: Oben, Unten, Links und Rechts).
 Erkannt wird das Programm am Prozessnamen (z.B. notepad.exe); es wird sein
 Hauptfenster verwendet. In der Liste steht hinter dem Namen "Eigenes".
 Entfernen: Rechtsklick auf die Zeile > "… entfernen". Dabei wird auch die
@@ -316,6 +345,13 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.24 bis 2.28  Ausrichten getrennt nach Oben, Unten, Links und Rechts, dazu
+               "Automatisch" (bisher "Oben / Seiten"); Abstand frei wählbar
+               (Standard 18 px), wird gespeichert und bei der Nachkorrektur
+               beim Start verwendet. Kanten je Programm selbst festlegen
+               (Oben, Unten, Links, Rechts, Mitte); "Automatisch" richtet alle
+               angehakten Kanten auf einmal aus, Links + Rechts = volle Breite.
+               Neues Programm-Icon.
 2.23           Fest eingebaute Programme, die nicht installiert sind, werden nicht
                angezeigt; andere per Rechtsklick ausblenden und wieder anzeigen.
 2.22           Screenshots für GitHub nach den globalen Vorgaben: --screenshots

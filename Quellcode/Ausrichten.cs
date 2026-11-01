@@ -169,15 +169,26 @@ public static class VisibleAlignment {
     if(edges.Contains("bottom"))dy=info.Work.Bottom-gap-visible.Bottom;
     if(edges.Contains("top"))dy=info.Work.Top+gap-visible.Top;
    }
-   if(edges.Contains("left"))dx=info.Work.Left+gap-visible.Left;
-   if(edges.Contains("right"))dx=info.Work.Right-gap-visible.Right;
-   // hcenter: waagerecht mittig im Arbeitsbereich, Größe und Höhe bleiben erhalten.
-   if(edges.Contains("hcenter"))dx=info.Work.Left+((info.Work.Right-info.Work.Left)-(visible.Right-visible.Left))/2-visible.Left;
+   // Links + Rechts: volle Breite (wie Oben + Unten volle Höhe).
+   bool resizeWidth=edges.Contains("left")&&edges.Contains("right");
+   int widthChange=0;
+   if(resizeWidth) {
+    int desiredVisibleWidth=info.Work.Right-info.Work.Left-2*gap;
+    if(desiredVisibleWidth<=0)throw new Exception("Arbeitsbereich ist zu klein.");
+    widthChange=desiredVisibleWidth-(visible.Right-visible.Left);
+    width+=widthChange;
+    dx=info.Work.Left+gap-visible.Left;
+   } else {
+    if(edges.Contains("left"))dx=info.Work.Left+gap-visible.Left;
+    if(edges.Contains("right"))dx=info.Work.Right-gap-visible.Right;
+    // hcenter: waagerecht mittig im Arbeitsbereich, Größe und Höhe bleiben erhalten.
+    if(edges.Contains("hcenter")&&!edges.Contains("left")&&!edges.Contains("right"))dx=info.Work.Left+((info.Work.Right-info.Work.Left)-(visible.Right-visible.Left))/2-visible.Left;
+   }
    if(visible.Top+dy<info.Work.Top || visible.Bottom+dy+heightChange>info.Work.Bottom ||
-      visible.Left+dx<info.Work.Left || visible.Right+dx>info.Work.Right)
+      visible.Left+dx<info.Work.Left || visible.Right+dx+widthChange>info.Work.Right)
     throw new Exception("Fenster passt mit diesem Abstand nicht in den Arbeitsbereich. Bitte zuerst die Breite verkleinern oder vollstaendig auf einen Bildschirm verschieben.");
    uint flags=0x0004|0x0010;
-   if(!resizeHeight)flags|=0x0001;
+   if(!resizeHeight&&!resizeWidth)flags|=0x0001;
    if(!SetWindowPos(handle,IntPtr.Zero,outer.Left+dx,outer.Top+dy,width,height,flags))
     throw new Exception(MoveError(Marshal.GetLastWin32Error(),"Fenster konnte nicht ausgerichtet werden."));
    Thread.Sleep(400);
@@ -186,6 +197,7 @@ public static class VisibleAlignment {
    foreach(string edge in edges.Split(' ')) {
     int actual;string label;
     if(edge=="hcenter") {
+     if(edges.Contains("left")||edges.Contains("right"))continue;
      int leftGap=visible.Left-info.Work.Left,rightGap=info.Work.Right-visible.Right;
      if(Math.Abs(leftGap-rightGap)>2)throw new Exception("Mitte: nach Verschieben links "+leftGap+" und rechts "+rightGap+" Pixel.");
      results.Add("Mittig: links "+leftGap+" px, rechts "+rightGap+" px");

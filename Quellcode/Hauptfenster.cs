@@ -24,7 +24,12 @@ public class MainForm:Form {
  // Demo-Ansicht für die Screenshots (--screenshots): ohne eigene Programme und ohne Datenübernahme.
  public static bool DemoMode;
  ProgramList list=new ProgramList();
- ModernButton restore,save,all,folder,align,edges,admin,addProgram;
+ ModernButton restore,save,all,folder,admin,addProgram;
+ // Ausrichten: je eine Schaltfläche pro Kante und "Automatisch" (Regeln je Programm), Abstand frei wählbar.
+ ModernButton alignTop,alignBottom,alignLeft,alignRight,alignAuto,alignRules;
+ readonly TextBox gapBox=new TextBox();
+ readonly ToolTip alignTips=new ToolTip();
+ const int DefaultGap=18;
  TableLayoutPanel layout;
  readonly ContextMenuStrip rowMenu=new ContextMenuStrip();
  TextBox log=new TextBox();
@@ -61,8 +66,11 @@ public class MainForm:Form {
   }
   restore=new ModernButton("Wiederherstellen",ButtonKind.Primary,"");
   save=new ModernButton("Positionen speichern",ButtonKind.Secondary,"");
-  align=new ModernButton("Unten ausrichten (18 px)",ButtonKind.Secondary,"");
-  edges=new ModernButton("Oben / Seiten (18 px)",ButtonKind.Secondary,"");
+  alignTop=new ModernButton("Oben",ButtonKind.Secondary,"\uE74A");
+  alignBottom=new ModernButton("Unten",ButtonKind.Secondary,"\uE74B");
+  alignLeft=new ModernButton("Links",ButtonKind.Secondary,"\uE72B");
+  alignRight=new ModernButton("Rechts",ButtonKind.Secondary,"\uE72A");
+  alignAuto=new ModernButton("Automatisch",ButtonKind.Secondary,"\uE740");
   folder=new ModernButton("Sicherungen öffnen",ButtonKind.Secondary,"");
   all=new ModernButton("Alle auswählen",ButtonKind.Ghost,null);
   all.Height=Ui.Px(32);all.Margin=new Padding(0);folder.Margin=new Padding(0);
@@ -109,7 +117,32 @@ public class MainForm:Form {
   var actions=new FlowLayoutPanel{Dock=DockStyle.Fill,Margin=new Padding(0,0,0,Ui.Px(14)),Padding=new Padding(0),BackColor=Ui.Bg,WrapContents=false};
   var alignLabel=new Label{Text="Ausrichten",AutoSize=true,Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
   alignLabel.Margin=new Padding(0,Math.Max(0,(Ui.Px(38)-alignLabel.PreferredHeight)/2),Ui.Px(10),0);
-  actions.Controls.AddRange(new Control[]{restore,save,new ActionSeparator(),alignLabel,align,edges});
+  actions.Controls.AddRange(new Control[]{restore,save});
+
+  // Zweite Zeile: Ausrichten an der sichtbaren Fensterkante mit frei wählbarem Abstand.
+  var alignRow=new FlowLayoutPanel{Dock=DockStyle.Fill,Margin=new Padding(0,0,0,Ui.Px(14)),Padding=new Padding(0),BackColor=Ui.Bg,WrapContents=false};
+  var gapLabel=new Label{Text="Abstand",AutoSize=true,Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
+  gapLabel.Margin=new Padding(Ui.Px(8),Math.Max(0,(Ui.Px(38)-gapLabel.PreferredHeight)/2),Ui.Px(8),0);
+  var pxLabel=new Label{Text="px",AutoSize=true,Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
+  pxLabel.Margin=new Padding(Ui.Px(6),Math.Max(0,(Ui.Px(38)-pxLabel.PreferredHeight)/2),0,0);
+  var gapCard=new Card{Size=new Size(Ui.Px(56),Ui.Px(38)),Margin=new Padding(0),Padding=new Padding(Ui.Px(6),Ui.Px(9),Ui.Px(6),0)};
+  gapBox.Dock=DockStyle.Fill;gapBox.BorderStyle=BorderStyle.None;gapBox.TextAlign=HorizontalAlignment.Center;gapBox.MaxLength=3;
+  gapBox.Font=Ui.UiFont;gapBox.BackColor=Ui.Surface;gapBox.ForeColor=Ui.TextColor;
+  gapBox.Text=SavedGap().ToString();
+  gapBox.KeyPress+=(s,e)=>{if(!Char.IsDigit(e.KeyChar)&&!Char.IsControl(e.KeyChar))e.Handled=true;};
+  gapBox.Leave+=(s,e)=>SaveGap();
+  gapCard.Controls.Add(gapBox);
+  alignRules=new ModernButton("Kanten je Programm",ButtonKind.Ghost,"\uE713");
+  alignRules.Margin=new Padding(Ui.Px(8),0,0,0);
+  alignRules.Click+=(s,e)=>EditEdges();
+  alignRow.Controls.AddRange(new Control[]{alignLabel,alignTop,alignBottom,alignLeft,alignRight,new ActionSeparator(),alignAuto,gapLabel,gapCard,pxLabel,alignRules});
+  alignTips.SetToolTip(alignRules,"Je Programm festlegen, welche Kanten ausgerichtet werden");
+  alignTips.SetToolTip(alignTop,"Ausgewählte Fenster an die Oberkante des Arbeitsbereichs setzen");
+  alignTips.SetToolTip(alignBottom,"Ausgewählte Fenster an die Unterkante des Arbeitsbereichs setzen (z.B. über die Taskleiste)");
+  alignTips.SetToolTip(alignLeft,"Ausgewählte Fenster an den linken Rand setzen");
+  alignTips.SetToolTip(alignRight,"Ausgewählte Fenster an den rechten Rand setzen");
+  alignTips.SetToolTip(alignAuto,"Alle angehakten Kanten aus „Kanten je Programm“ auf einmal ausrichten\r\n(Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig)");
+  alignTips.SetToolTip(gapBox,"Abstand der sichtbaren Fensterkante zum Rand in Bildschirmpixeln (Standard 18)");
 
   hint.Dock=DockStyle.Fill;hint.Margin=new Padding(0,0,0,Ui.Px(14));
   // Drei kurze Zeilen, je ein Thema, damit nichts mitten im Satz umbricht.
@@ -125,18 +158,19 @@ public class MainForm:Form {
   logCard.Controls.Add(log);logCard.Controls.Add(logTitle);log.BringToFront();
 
   int programsHeight=ProgramsHeight(entries.Count);
-  int fixedHeight=Ui.Px(76)+Ui.Px(17)+Ui.Px(52)+Ui.Px(88)+Ui.Px(64)+Ui.Px(18)+Ui.Px(2);
-  layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(Ui.Px(24),Ui.Px(18),Ui.Px(24),Ui.Px(2)),ColumnCount=1,RowCount=7,BackColor=Ui.Bg};
+  int fixedHeight=Ui.Px(76)+Ui.Px(17)+Ui.Px(52)+Ui.Px(52)+Ui.Px(88)+Ui.Px(64)+Ui.Px(18)+Ui.Px(2);
+  layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(Ui.Px(24),Ui.Px(18),Ui.Px(24),Ui.Px(2)),ColumnCount=1,RowCount=8,BackColor=Ui.Bg};
   layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(76)));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(17)));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,programsHeight));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(52)));
+  layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(52)));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(88)));
   layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(64)));
   layout.Controls.Add(header,0,0);layout.Controls.Add(activity,0,1);layout.Controls.Add(programsCard,0,2);
-  layout.Controls.Add(actions,0,3);layout.Controls.Add(hint,0,4);layout.Controls.Add(logCard,0,5);layout.Controls.Add(footer,0,6);
+  layout.Controls.Add(actions,0,3);layout.Controls.Add(alignRow,0,4);layout.Controls.Add(hint,0,5);layout.Controls.Add(logCard,0,6);layout.Controls.Add(footer,0,7);
   Controls.Add(layout);
 
   foreach(var e in entries) list.Add(new ProgramRow{Entry=e,Name=e.Name,Checked=false}); // Beim Start ist nichts angehakt.
@@ -155,8 +189,11 @@ public class MainForm:Form {
   all.Click+=(s,e)=>{bool select=list.Rows.Any(x=>!x.Checked);foreach(var row in list.Rows)row.Checked=select;UpdateSelection();};
   restore.Click+=async(s,e)=>await Run(false);
   save.Click+=async(s,e)=>await Run(true);
-  align.Click+=async(s,e)=>await AlignWindows(false);
-  edges.Click+=async(s,e)=>await AlignWindows(true);
+  alignTop.Click+=async(s,e)=>await AlignWindows("top");
+  alignBottom.Click+=async(s,e)=>await AlignWindows("bottom");
+  alignLeft.Click+=async(s,e)=>await AlignWindows("left");
+  alignRight.Click+=async(s,e)=>await AlignWindows("right");
+  alignAuto.Click+=async(s,e)=>await AlignWindows("auto");
   folder.Click+=OpenBackups;
   addProgram.Click+=(s,e)=>AddProgram();
   FormClosing+=(s,e)=>{if(busy)e.Cancel=true;};
@@ -198,6 +235,7 @@ public class MainForm:Form {
    if(control is Card){control.BackColor=Ui.Bg;card=true;}
    else if(!(control is ModernButton))control.BackColor=inCard?Ui.Surface:Ui.Bg;
    if(control is Label)control.ForeColor=(control.Tag as string)=="muted"?Ui.Muted:Ui.TextColor;
+   if(control is TextBox)control.ForeColor=Ui.TextColor;
    ApplyTheme(control,card);
   }
  }
@@ -294,7 +332,7 @@ public class MainForm:Form {
   UpdateProgramsHeight();
   var states=new Dictionary<string,string>{
    {"taskmanager","Unten: 18 px"},{"dumeter","Ausrichten übersprungen"},
-   {"franz","Unten: 18 px"},{"easy2sync","Unten: 18 px"}};
+   {"franz","Unten: 18 px"},{"easy2sync","Ausrichten übersprungen"}};
   foreach(var row in list.Rows) {
    string status;
    if(states.TryGetValue(row.Entry.Id,out status)){row.Checked=true;row.Status=status;}
@@ -306,7 +344,6 @@ public class MainForm:Form {
   Log("Unten ausrichten (18 px) für: Task-Manager, DU Meter, Franz, Easy2Sync");
   Log("Task-Manager: Unten: 18 px");
   Log("Franz: Unten: 18 px");
-  Log("Easy2Sync: Unten: 18 px");
   Log("Zum dauerhaften Übernehmen der ausgerichteten Fenster jetzt Positionen speichern.");
  }
  void UpdateSelection() {
@@ -316,7 +353,7 @@ public class MainForm:Form {
  }
  void SetBusy(bool on) {
   busy=on;list.Enabled=!on;
-  foreach(var button in new Button[]{restore,save,all,align,edges,folder,admin,addProgram})if(button!=null)button.Enabled=!on;
+  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignAuto,alignRules,folder,admin,addProgram})if(button!=null)button.Enabled=!on;
   activity.Active=on;
  }
  static string Quote(string s){return "\""+s+"\"";}
@@ -351,33 +388,146 @@ public class MainForm:Form {
    service.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running,TimeSpan.FromSeconds(20));
   }
  }
- async Task AlignWindows(bool topSides) {
+ // Abstand: zuletzt verwendeter Wert aus Positionen.json ("_gap"), sonst 18.
+ int SavedGap() {
+  try {if(profiles!=null&&profiles.ContainsKey("_gap"))return ClampGap(Convert.ToInt32(profiles["_gap"]));} catch {}
+  return DefaultGap;
+ }
+ static int ClampGap(int value){return Math.Max(0,Math.Min(200,value));}
+ int CurrentGap() {
+  int value;
+  if(!Int32.TryParse(gapBox.Text.Trim(),out value))value=DefaultGap;
+  value=ClampGap(value);
+  if(gapBox.Text!=value.ToString())gapBox.Text=value.ToString();
+  return value;
+ }
+ void SaveGap() {
+  int gap=CurrentGap();
+  if(gap==SavedGap()&&profiles.ContainsKey("_gap"))return;
+  if(DemoMode)return;
+  try {
+   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+   copy["_gap"]=gap;
+   Store.Write(Store.Profiles,copy);
+   profiles=copy;
+  } catch(Exception ex) {Log("Abstand konnte nicht gespeichert werden: "+ex.Message);}
+ }
+ // Gespeicherte Regel "Kanten" oder "Kanten:Abstand" (ältere Regeln ohne Abstand: 18 px).
+ static void ParseRule(string rule,out string edges,out int gap) {
+  edges=rule??"";gap=DefaultGap;
+  int colon=edges.IndexOf(':');
+  if(colon>=0) {
+   int value;
+   if(Int32.TryParse(edges.Substring(colon+1),out value))gap=ClampGap(value);
+   edges=edges.Substring(0,colon);
+  }
+  edges=edges.Trim();
+ }
+ // Einzelne Richtung in eine vorhandene Regel einfügen: gleiche Achse ersetzen, andere Achse behalten.
+ static string MergeRule(string oldEdges,string direction) {
+  bool vertical=direction=="top"||direction=="bottom";
+  var keep=new List<string>();
+  foreach(string edge in (oldEdges??"").Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries)) {
+   bool edgeVertical=edge=="top"||edge=="bottom";
+   if(edgeVertical!=vertical)keep.Add(edge);
+  }
+  keep.Add(direction);
+  var order=new[]{"top","bottom","left","right","hcenter"};
+  return String.Join(" ",order.Where(x=>keep.Contains(x)).ToArray());
+ }
+ // Kanten je Programm (Fenster "Kanten je Programm"): angehakte Kanten werden bei "Automatisch" zusammen
+ // ausgerichtet; die Schaltflächen Oben/Unten/Links/Rechts richten nur Programme aus, bei denen die Kante angehakt ist.
+ // Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig.
+ // Gespeichert in Positionen.json ("_edges"); ohne Einstellung gelten diese Vorgaben (Verhalten bis 2.23).
+ internal static readonly string[] AllEdges={"top","bottom","left","right","hcenter"};
+ internal static readonly string[] StandardEdges={"top","bottom","left","right"};
+ internal static readonly Dictionary<string,string[]> DefaultEdges=new Dictionary<string,string[]>{
+  {"taskmanager",new[]{"bottom","right"}},
+  {"dumeter",new[]{"top","right"}},
+  {"franz",new[]{"top","bottom","left"}},
+  {"ts3",new[]{"top"}},
+  {"ts6",new[]{"top","bottom"}},
+  {"discord",new[]{"bottom","left"}},
+  {"easy2sync",new[]{"hcenter"}},
+  {"gpuz",new[]{"bottom"}}
+ };
+ // Vorgabe für ein Programm: Tabelle oben, sonst (z.B. eigene Programme) alle vier Kanten ohne Mitte.
+ internal static HashSet<string> DefaultEdgesFor(string id) {
+  string[] edges;
+  return new HashSet<string>(DefaultEdges.TryGetValue(id,out edges)?edges:StandardEdges);
+ }
+ HashSet<string> EdgesFor(string id) {
+  var saved=profiles!=null&&profiles.ContainsKey("_edges")?profiles["_edges"] as Dictionary<string,object>:null;
+  if(saved!=null&&saved.ContainsKey(id)) {
+   var set=new HashSet<string>();
+   var items=saved[id] as System.Collections.IEnumerable;
+   if(items!=null&&!(saved[id] is string))foreach(object item in items)if(item!=null)set.Add(Convert.ToString(item));
+   return set;
+  }
+  return DefaultEdgesFor(id);
+ }
+ bool Skipped(string mode,string id) {
+  return mode!="auto"&&!EdgesFor(id).Contains(mode);
+ }
+ // Kanten für "Automatisch" in fester Reihenfolge; Mitte nur, wenn weder links noch rechts angehakt ist.
+ string AutoEdges(string id) {
+  var set=EdgesFor(id);
+  if(set.Contains("left")||set.Contains("right"))set.Remove("hcenter");
+  return String.Join(" ",AllEdges.Where(x=>set.Contains(x)).ToArray());
+ }
+ void EditEdges() {
+  if(busy)return;
+  var current=new Dictionary<string,HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+  foreach(var e in entries)current[e.Id]=EdgesFor(e.Id);
+  Dictionary<string,HashSet<string>> result;
+  using(var dialog=new AlignRulesForm(Icon,entries,current)) {
+   if(dialog.ShowDialog(this)!=DialogResult.OK)return;
+   result=dialog.Rules;
+  }
+  var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+  var saved=copy.ContainsKey("_edges")?copy["_edges"] as Dictionary<string,object>:null;
+  if(saved==null){saved=new Dictionary<string,object>();copy["_edges"]=saved;}
+  foreach(var pair in result)saved[pair.Key]=AllEdges.Where(x=>pair.Value.Contains(x)).ToList();
+  copy.Remove("_skip");
+  try {Store.Write(Store.Profiles,copy);}
+  catch(Exception ex) {Log("Kanten je Programm konnten nicht gespeichert werden: "+ex.Message);return;}
+  profiles=copy;
+  var lines=new List<string>();
+  foreach(var e in entries) {
+   HashSet<string> set;
+   if(result.TryGetValue(e.Id,out set))lines.Add(e.Name+": "+(set.Count>0?String.Join(", ",AllEdges.Where(x=>set.Contains(x)).Select(x=>DirectionName(x)).ToArray()):"keine"));
+  }
+  Log("Kanten je Programm gespeichert – "+String.Join("; ",lines.ToArray()));
+ }
+ static string DirectionName(string mode) {
+  switch(mode){case "top":return "Oben";case "bottom":return "Unten";case "left":return "Links";case "right":return "Rechts";case "hcenter":return "Mitte";default:return "Automatisch";}
+ }
+ async Task AlignWindows(string mode) {
   var selected=list.Rows.Where(x=>x.Checked).ToList();
   if(selected.Count==0){MessageBox.Show(this,"Bitte mindestens ein Programm auswählen.");return;}
+  int gap=CurrentGap();
+  SaveGap();
   SetBusy(true);
   try {
    // Nur die angehakten Programme werden ausgerichtet; alle anderen bleiben unverändert.
-   Log((topSides?"Oben / Seiten (18 px)":"Unten ausrichten (18 px)")+" für: "+String.Join(", ",selected.Select(x=>x.Name).ToArray()));
+   Log(DirectionName(mode)+" ausrichten ("+gap+" px) für: "+String.Join(", ",selected.Select(x=>x.Name).ToArray()));
    foreach(var item in selected) {
     var entry=item.Entry;
-        string targetEdges="bottom";
-    if(topSides) {
-     switch(entry.Id) {
-      case "dumeter":targetEdges="top right";break;
-      case "ts3":case "ts6":targetEdges="top bottom";break;
-      case "franz":targetEdges="top bottom left";break;
-      case "discord":targetEdges="bottom left";break;
-      case "taskmanager":targetEdges="right";break;
-      case "easy2sync":targetEdges="hcenter";break;
-      default:item.Status="Ausrichten übersprungen";continue;
-     }
-    } else if(entry.Id=="dumeter"||entry.Id=="ts3"){item.Status="Ausrichten übersprungen";continue;}
+    string targetEdges=mode;
+    if(Skipped(mode,entry.Id)){item.Status="Ausrichten übersprungen";continue;}
+    if(mode=="auto") {
+     // Alle angehakten Kanten aus "Kanten je Programm" auf einmal.
+     targetEdges=AutoEdges(entry.Id);
+     if(targetEdges.Length==0){item.Status="Ausrichten übersprungen";continue;}
+    }
     item.Status="Fensterkante wird gemessen …";
     try {
-          string status=await Task.Run(()=>VisibleAlignment.AlignEntry(entry,18,targetEdges));
-     if(targetEdges=="hcenter") {
+     string edges=targetEdges;
+     string status=await Task.Run(()=>VisibleAlignment.AlignEntry(entry,gap,edges));
+     if(edges.Contains("hcenter")) {
       // Bei Easy2Sync auch weitere offene Fenster (z.B. Synchronisation) waagerecht mittig setzen.
-      var extra=await Task.Run(()=>VisibleAlignment.AlignOthers(entry,18,targetEdges));
+      // Weitere Fenster nur waagerecht mittig (ihre Höhe und senkrechte Lage bleiben).
+      var extra=await Task.Run(()=>VisibleAlignment.AlignOthers(entry,gap,"hcenter"));
       foreach(string line in extra)Log(entry.Name+" – "+line);
       if(extra.Count>0)status+="; "+extra.Count+" weitere(s) Fenster";
      }
@@ -385,7 +535,11 @@ public class MainForm:Form {
      Dictionary<string,object> rules;
      if(alignedProfiles.ContainsKey("_alignment"))rules=(Dictionary<string,object>)alignedProfiles["_alignment"];
      else {rules=new Dictionary<string,object>();alignedProfiles["_alignment"]=rules;}
-     rules[entry.Id]=targetEdges;
+     // Regel für die Nachkorrektur beim Start: einzelne Richtungen ergänzen die bisherige Regel.
+     string oldEdges;int oldGap;
+     ParseRule(rules.ContainsKey(entry.Id)?Convert.ToString(rules[entry.Id]):"",out oldEdges,out oldGap);
+     string rule=mode=="auto"?edges:MergeRule(oldEdges,mode);
+     rules[entry.Id]=rule+":"+gap;
      Store.Write(Store.Profiles,alignedProfiles);
      profiles=alignedProfiles;
      if(entry.Id=="dumeter") {
@@ -470,7 +624,6 @@ public class MainForm:Form {
   if(busy)return;
   var row=e.Row;
   var hidden=HiddenBuiltIns();
-  if((row==null||row.Entry==null)&&hidden.Count==0)return;
   // Menü bei jedem Öffnen neu aufbauen, damit Farben und Symbol zum aktuellen Hell-/Dunkelmodus passen.
   MenuStyle.Prepare(rowMenu);
   rowMenu.Items.Add(MenuStyle.TopSpacer());
@@ -482,6 +635,8 @@ public class MainForm:Form {
    if(row!=null&&row.Entry!=null)rowMenu.Items.Add(new ToolStripSeparator());
    rowMenu.Items.Add(MenuStyle.Item("Ausgeblendete wieder anzeigen ("+hidden.Count+")",'\uE890',(s,a)=>ShowHiddenPrograms()));
   }
+  if(rowMenu.Items.Count>1)rowMenu.Items.Add(new ToolStripSeparator());
+  rowMenu.Items.Add(MenuStyle.Item("Kanten je Programm …",'\uE713',(s,a)=>EditEdges()));
   rowMenu.Items.Add(MenuStyle.BottomSpacer());
   rowMenu.Show(list,e.Location);
  }
@@ -609,7 +764,8 @@ public class MainForm:Form {
  void StartWithAlignment(Entry e,bool afterRestore) {
   if(!System.IO.File.Exists(e.Exe))throw new FileNotFoundException("Programmdatei fehlt: "+e.Exe);
   Process.Start(new ProcessStartInfo(e.Exe,e.Args??""){WorkingDirectory=Path.GetDirectoryName(e.Exe),UseShellExecute=true});
-  string rule=StartupRule(e);
+  string rule;int gap;
+  ParseRule(StartupRule(e),out rule,out gap);
   if(String.IsNullOrEmpty(rule))return;
   BeginInvoke((Action)(()=>Log(e.Name+": gestartet; Fensterkante wird waehrend des Starts nachkorrigiert …")));
   // Reapply through the loading phase: Electron can change bounds after its first window appears.
@@ -619,13 +775,13 @@ public class MainForm:Form {
   Thread.Sleep(2000);
   while(timer.ElapsedMilliseconds<25000) {
    try {
-    VisibleAlignment.AlignEntry(e,18,rule);
+    VisibleAlignment.AlignEntry(e,gap,rule);
     success=true;
     lastError=null;
     // Keep watching through at least twelve seconds of startup.
     if(timer.ElapsedMilliseconds>=12000) {
      Thread.Sleep(1500);
-     string result=VisibleAlignment.AlignEntry(e,18,rule);
+     string result=VisibleAlignment.AlignEntry(e,gap,rule);
      if(e.Id=="dumeter" && !afterRestore)RestartDUMeterService();
      BeginInvoke((Action)(()=>Log(e.Name+": nach Start geprueft – "+result)));
      return;

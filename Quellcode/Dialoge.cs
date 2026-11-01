@@ -220,4 +220,105 @@ public class AddProgramForm:FixedSizeForm {
   Close();
  }
 }
+
+// Dialog "Kanten je Programm": je Programm die Kanten festlegen, an denen ausgerichtet wird.
+public class AlignRulesForm:FixedSizeForm {
+ static readonly string[] Directions={"top","bottom","left","right","hcenter"};
+ static readonly string[] Titles={"Oben","Unten","Links","Rechts","Mitte"};
+ readonly List<Entry> programs;
+ readonly Dictionary<string,CheckCell[]> cells=new Dictionary<string,CheckCell[]>(StringComparer.OrdinalIgnoreCase);
+ public Dictionary<string,HashSet<string>> Rules;
+ public AlignRulesForm(Icon icon,IEnumerable<Entry> list,Dictionary<string,HashSet<string>> current) {
+  programs=new List<Entry>(list);
+  Rules=new Dictionary<string,HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+  Text="Kanten je Programm";
+  StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
+  Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
+  int w=Ui.Px(600),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
+  Controls.Add(new Label{Text="Kanten je Programm",Font=Ui.HeadingFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,Bounds=new Rectangle(pad,y,inner,Ui.Px(32))});
+  y+=Ui.Px(34);
+  Controls.Add(new Label{Text="„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig). Oben, Unten, Links und Rechts richten nur Programme aus, bei denen die Kante angehakt ist.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(60))});
+  y+=Ui.Px(66);
+  int head=Ui.Px(36),rowH=Ui.Px(40),colW=Ui.Px(66);
+  int visibleRows=Math.Max(1,Math.Min(programs.Count,9));
+  var card=new Card{Bounds=new Rectangle(pad,y,inner,head+visibleRows*rowH+Ui.Px(10)),Padding=new Padding(Ui.Px(1))};
+  int colX=inner-Ui.Px(12)-Directions.Length*colW;
+  var header=new Panel{Dock=DockStyle.Top,Height=head,BackColor=Ui.Surface};
+  header.Controls.Add(new Label{Text="Programm",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),0,colX-Ui.Px(16),head)});
+  for(int i=0;i<Titles.Length;i++)
+   header.Controls.Add(new Label{Text=Titles[i],Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleCenter,Bounds=new Rectangle(colX+i*colW,0,colW,head)});
+  var rows=new Panel{Dock=DockStyle.Fill,AutoScroll=true,BackColor=Ui.Surface};
+  rows.HandleCreated+=(s,e)=>Native.DarkScroll(rows);
+  for(int r=0;r<programs.Count;r++) {
+   var entry=programs[r];
+   int top=r*rowH;
+   rows.Controls.Add(new Label{Text=entry.Name+(entry.Custom?"  (Eigenes)":""),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),top,colX-Ui.Px(20),rowH)});
+   var row=new CheckCell[Directions.Length];
+   HashSet<string> allowed;
+   if(!current.TryGetValue(entry.Id,out allowed))allowed=MainForm.DefaultEdgesFor(entry.Id);
+   for(int i=0;i<Directions.Length;i++) {
+    row[i]=new CheckCell{Bounds=new Rectangle(colX+i*colW,top,colW,rowH),Checked=allowed.Contains(Directions[i])};
+    rows.Controls.Add(row[i]);
+   }
+   cells[entry.Id]=row;
+  }
+  card.Controls.Add(rows);card.Controls.Add(header);rows.BringToFront();
+  Controls.Add(card);
+  y+=card.Height+Ui.Px(20);
+  var standard=new ModernButton("Standard",ButtonKind.Secondary,"");
+  standard.Location=new Point(pad,y);
+  standard.Click+=(s,e)=>ResetToDefaults();
+  var ok=new ModernButton("Speichern",ButtonKind.Primary,null);
+  var cancel=new ModernButton("Abbrechen",ButtonKind.Secondary,null);
+  cancel.DialogResult=DialogResult.Cancel;
+  cancel.Location=new Point(w-pad-cancel.Width,y);
+  ok.Location=new Point(cancel.Left-Ui.Px(8)-ok.Width,y);
+  ok.Click+=(s,e)=>Accept();
+  Controls.Add(standard);Controls.Add(ok);Controls.Add(cancel);
+  AcceptButton=ok;CancelButton=cancel;
+  y+=Ui.Px(38)+Ui.Px(20);
+  ClientSize=new Size(w,y);
+ }
+ void ResetToDefaults() {
+  foreach(var entry in programs) {
+   var allowed=MainForm.DefaultEdgesFor(entry.Id);
+   var row=cells[entry.Id];
+   for(int i=0;i<Directions.Length;i++)row[i].Checked=allowed.Contains(Directions[i]);
+  }
+ }
+ void Accept() {
+  foreach(var entry in programs) {
+   var set=new HashSet<string>();
+   var row=cells[entry.Id];
+   for(int i=0;i<Directions.Length;i++)if(row[i].Checked)set.Add(Directions[i]);
+   Rules[entry.Id]=set;
+  }
+  DialogResult=DialogResult.OK;
+  Close();
+ }
+}
+// Einzelnes Häkchen (wie in der Programmliste), anklickbar und per Leertaste umschaltbar.
+public class CheckCell:Control {
+ bool isChecked;
+ public CheckCell() {
+  SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.Selectable,true);
+  BackColor=Ui.Surface;Cursor=Cursors.Hand;TabStop=true;
+ }
+ public bool Checked{get{return isChecked;}set{isChecked=value;Invalidate();}}
+ protected override void OnMouseClick(MouseEventArgs e){base.OnMouseClick(e);if(e.Button==MouseButtons.Left){Focus();Checked=!Checked;}}
+ protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(e.KeyCode==Keys.Space){Checked=!Checked;e.Handled=true;}}
+ protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+ protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+ protected override void OnPaint(PaintEventArgs e) {
+  var g=e.Graphics;
+  g.Clear(BackColor);
+  g.SmoothingMode=SmoothingMode.AntiAlias;
+  int size=Ui.Px(20);
+  var box=new Rectangle((Width-size)/2,(Height-size)/2,size,size);
+  ProgramList.DrawCheck(g,box,isChecked,Enabled);
+  if(Focused&&ShowFocusCues)
+   using(var path=Ui.Round(Rectangle.Inflate(box,Ui.Px(3),Ui.Px(3)),Ui.Px(5)))
+   using(var pen=new Pen(Ui.Blend(Ui.Accent,Ui.Surface,0.3f))) g.DrawPath(pen,path);
+ }
+}
 }

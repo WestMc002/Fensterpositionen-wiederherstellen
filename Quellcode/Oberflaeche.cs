@@ -541,7 +541,7 @@ public class ProgramList:Panel {
    TextRenderer.DrawText(g,item.Status,Ui.SmallFont,textRect,neutral?Ui.Muted:Ui.Blend(color,Ui.Tint,Ui.Dark?0.25f:0.1f),flags|TextFormatFlags.Left|TextFormatFlags.NoPadding);
   }
  }
- static void DrawCheck(Graphics g,Rectangle box,bool on,bool enabled) {
+ internal static void DrawCheck(Graphics g,Rectangle box,bool on,bool enabled) {
   using(var path=Ui.Round(box,Ui.Px(4))) {
    if(on) {
     using(var brush=new SolidBrush(enabled?Ui.Primary:Ui.Blend(Ui.Primary,Ui.Surface,0.5f))) g.FillPath(brush,path);
