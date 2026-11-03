@@ -30,7 +30,7 @@ The interface is in German.
   - Easy2Sync and your own programs stay open; their window is measured and moved directly.
 - **Add any program:** pick any open window, its position and size are saved right away. Remove it again with a right-click.
 - **Only what you use:** built-in programs that are not installed are not shown; others can be hidden with a right-click (and shown again the same way).
-- **Align windows** to the visible window edge: top, bottom, left or right, or “Automatisch” with all edges you ticked for the program (top + bottom = full height, left + right = full width, centre). The distance to the edge of the work area is adjustable (default 18 px). Invisible Windows borders and DPI scaling are taken into account.
+- **Align windows** to the visible window edge: top, bottom, left, right, centred horizontally (“↔ Mitte”) or vertically (“↕ Mitte”), or “Automatisch” with all edges you ticked for the program (top + bottom = full height, left + right = full width). The distance to the edge of the work area is adjustable (default 18 px). Invisible Windows borders and DPI scaling are taken into account.
 - **Correction while starting:** saved alignment rules are re-applied while a program loads.
 - Nothing is selected at start – only the checked programs are processed.
 - Restart as administrator with one click (needed for programs running elevated).
@@ -74,7 +74,7 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
   - Easy2Sync und eigene Programme bleiben offen; ihr Fenster wird direkt gemessen und verschoben.
 - **Beliebige Programme hinzufügen:** ein geöffnetes Fenster auswählen, Position und Größe werden gleich gespeichert. Entfernen per Rechtsklick.
 - **Nur was du brauchst:** Fest eingebaute Programme, die nicht installiert sind, erscheinen nicht; andere lassen sich per Rechtsklick ausblenden (und genauso wieder anzeigen).
-- **Fenster ausrichten** an der sichtbaren Fensterkante: oben, unten, links oder rechts, oder „Automatisch“ mit allen Kanten, die je Programm angehakt sind (oben + unten = volle Höhe, links + rechts = volle Breite, Mitte). Der Abstand zum Rand des Arbeitsbereichs ist einstellbar (Standard 18 px). Unsichtbare Windows-Fensterrahmen und DPI-Skalierung werden berücksichtigt.
+- **Fenster ausrichten** an der sichtbaren Fensterkante: oben, unten, links, rechts, waagerecht („↔ Mitte“) oder senkrecht („↕ Mitte“) mittig, oder „Automatisch“ mit allen Kanten, die je Programm angehakt sind (oben + unten = volle Höhe, links + rechts = volle Breite). Der Abstand zum Rand des Arbeitsbereichs ist einstellbar (Standard 18 px). Unsichtbare Windows-Fensterrahmen und DPI-Skalierung werden berücksichtigt.
 - **Nachkorrektur beim Start:** gespeicherte Ausrichtungen werden während der Ladephase eines Programms erneut angewandt.
 - Beim Start ist nichts angehakt – bearbeitet wird nur, was angehakt ist.
 - Neustart als Administrator per Klick (nötig für Programme, die mit Administratorrechten laufen).

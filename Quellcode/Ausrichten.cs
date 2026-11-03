@@ -168,6 +168,8 @@ public static class VisibleAlignment {
    } else {
     if(edges.Contains("bottom"))dy=info.Work.Bottom-gap-visible.Bottom;
     if(edges.Contains("top"))dy=info.Work.Top+gap-visible.Top;
+    // vcenter: senkrecht mittig im Arbeitsbereich (nur ohne Oben/Unten), Größe bleibt erhalten.
+    if(edges.Contains("vcenter")&&!edges.Contains("top")&&!edges.Contains("bottom"))dy=info.Work.Top+((info.Work.Bottom-info.Work.Top)-(visible.Bottom-visible.Top))/2-visible.Top;
    }
    // Links + Rechts: volle Breite (wie Oben + Unten volle Höhe).
    bool resizeWidth=edges.Contains("left")&&edges.Contains("right");
@@ -196,11 +198,18 @@ public static class VisibleAlignment {
    var results=new List<string>();
    foreach(string edge in edges.Split(' ')) {
     int actual;string label;
+    if(edge=="vcenter") {
+     if(edges.Contains("top")||edges.Contains("bottom"))continue;
+     int topGap=visible.Top-info.Work.Top,bottomGap=info.Work.Bottom-visible.Bottom;
+     if(Math.Abs(topGap-bottomGap)>2)throw new Exception("Mitte senkrecht: nach Verschieben oben "+topGap+" und unten "+bottomGap+" Pixel.");
+     results.Add("Mitte ↕: oben "+topGap+" px, unten "+bottomGap+" px");
+     continue;
+    }
     if(edge=="hcenter") {
      if(edges.Contains("left")||edges.Contains("right"))continue;
      int leftGap=visible.Left-info.Work.Left,rightGap=info.Work.Right-visible.Right;
      if(Math.Abs(leftGap-rightGap)>2)throw new Exception("Mitte: nach Verschieben links "+leftGap+" und rechts "+rightGap+" Pixel.");
-     results.Add("Mittig: links "+leftGap+" px, rechts "+rightGap+" px");
+     results.Add("Mitte ↔: links "+leftGap+" px, rechts "+rightGap+" px");
      continue;
     }
     switch(edge) {

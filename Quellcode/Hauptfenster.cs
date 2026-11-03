@@ -26,7 +26,7 @@ public class MainForm:Form {
  ProgramList list=new ProgramList();
  ModernButton restore,save,all,folder,admin,addProgram;
  // Ausrichten: je eine Schaltfläche pro Kante und "Automatisch" (Regeln je Programm), Abstand frei wählbar.
- ModernButton alignTop,alignBottom,alignLeft,alignRight,alignAuto,alignRules;
+ ModernButton alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules;
  readonly TextBox gapBox=new TextBox();
  readonly ToolTip alignTips=new ToolTip();
  const int DefaultGap=18;
@@ -70,6 +70,9 @@ public class MainForm:Form {
   alignBottom=new ModernButton("Unten",ButtonKind.Secondary,"\uE74B");
   alignLeft=new ModernButton("Links",ButtonKind.Secondary,"\uE72B");
   alignRight=new ModernButton("Rechts",ButtonKind.Secondary,"\uE72A");
+  // Mitte ohne Symbolschrift: die Pfeile ↔ und ↕ stehen im Text.
+  alignHCenter=new ModernButton("↔ Mitte",ButtonKind.Secondary,null);
+  alignVCenter=new ModernButton("↕ Mitte",ButtonKind.Secondary,null);
   alignAuto=new ModernButton("Automatisch",ButtonKind.Secondary,"\uE740");
   folder=new ModernButton("Sicherungen öffnen",ButtonKind.Secondary,"");
   all=new ModernButton("Alle auswählen",ButtonKind.Ghost,null);
@@ -109,6 +112,7 @@ public class MainForm:Form {
    selectionInfo.Location=new Point(programsTitle.Right+Ui.Px(10),(programsHead.Height-selectionInfo.Height)/2+1);
    all.Location=new Point(programsHead.Width-all.Width-Ui.Px(4),(programsHead.Height-all.Height)/2);
    addProgram.Location=new Point(all.Left-Ui.Px(4)-addProgram.Width,(programsHead.Height-addProgram.Height)/2);
+   if(alignRules!=null)alignRules.Location=new Point(addProgram.Left-Ui.Px(4)-alignRules.Width,(programsHead.Height-alignRules.Height)/2);
   };
   programsHead.Resize+=layoutHead;all.SizeChanged+=layoutHead;addProgram.SizeChanged+=layoutHead;
   list.Dock=DockStyle.Fill;
@@ -133,15 +137,21 @@ public class MainForm:Form {
   gapBox.Leave+=(s,e)=>SaveGap();
   gapCard.Controls.Add(gapBox);
   alignRules=new ModernButton("Kanten je Programm",ButtonKind.Ghost,"\uE713");
-  alignRules.Margin=new Padding(Ui.Px(8),0,0,0);
+  // "Kanten je Programm" steht oben in der Kopfzeile der Programmliste (die Ausrichten-Zeile ist voll).
+  alignRules.Height=Ui.Px(32);alignRules.Margin=new Padding(0);
   alignRules.Click+=(s,e)=>EditEdges();
-  alignRow.Controls.AddRange(new Control[]{alignLabel,alignTop,alignBottom,alignLeft,alignRight,new ActionSeparator(),alignAuto,gapLabel,gapCard,pxLabel,alignRules});
+  programsHead.Controls.Add(alignRules);
+  alignRules.SizeChanged+=layoutHead;
+  layoutHead(null,EventArgs.Empty);
+  alignRow.Controls.AddRange(new Control[]{alignLabel,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,new ActionSeparator(),alignAuto,gapLabel,gapCard,pxLabel});
   alignTips.SetToolTip(alignRules,"Je Programm festlegen, welche Kanten ausgerichtet werden");
   alignTips.SetToolTip(alignTop,"Ausgewählte Fenster an die Oberkante des Arbeitsbereichs setzen");
   alignTips.SetToolTip(alignBottom,"Ausgewählte Fenster an die Unterkante des Arbeitsbereichs setzen (z.B. über die Taskleiste)");
   alignTips.SetToolTip(alignLeft,"Ausgewählte Fenster an den linken Rand setzen");
   alignTips.SetToolTip(alignRight,"Ausgewählte Fenster an den rechten Rand setzen");
-  alignTips.SetToolTip(alignAuto,"Alle angehakten Kanten aus „Kanten je Programm“ auf einmal ausrichten\r\n(Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig)");
+  alignTips.SetToolTip(alignHCenter,"Ausgewählte Fenster waagerecht mittig setzen (gleicher Abstand links und rechts)");
+  alignTips.SetToolTip(alignVCenter,"Ausgewählte Fenster senkrecht mittig setzen (gleicher Abstand oben und unten)");
+  alignTips.SetToolTip(alignAuto,"Alle angehakten Kanten aus „Kanten je Programm“ auf einmal ausrichten\r\n(Oben + Unten = volle Höhe, Links + Rechts = volle Breite, ↔/↕ Mitte = mittig)");
   alignTips.SetToolTip(gapBox,"Abstand der sichtbaren Fensterkante zum Rand in Bildschirmpixeln (Standard 18)");
 
   hint.Dock=DockStyle.Fill;hint.Margin=new Padding(0,0,0,Ui.Px(14));
@@ -193,6 +203,8 @@ public class MainForm:Form {
   alignBottom.Click+=async(s,e)=>await AlignWindows("bottom");
   alignLeft.Click+=async(s,e)=>await AlignWindows("left");
   alignRight.Click+=async(s,e)=>await AlignWindows("right");
+  alignHCenter.Click+=async(s,e)=>await AlignWindows("hcenter");
+  alignVCenter.Click+=async(s,e)=>await AlignWindows("vcenter");
   alignAuto.Click+=async(s,e)=>await AlignWindows("auto");
   folder.Click+=OpenBackups;
   addProgram.Click+=(s,e)=>AddProgram();
@@ -353,7 +365,7 @@ public class MainForm:Form {
  }
  void SetBusy(bool on) {
   busy=on;list.Enabled=!on;
-  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignAuto,alignRules,folder,admin,addProgram})if(button!=null)button.Enabled=!on;
+  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules,folder,admin,addProgram})if(button!=null)button.Enabled=!on;
   activity.Active=on;
  }
  static string Quote(string s){return "\""+s+"\"";}
@@ -425,21 +437,21 @@ public class MainForm:Form {
  }
  // Einzelne Richtung in eine vorhandene Regel einfügen: gleiche Achse ersetzen, andere Achse behalten.
  static string MergeRule(string oldEdges,string direction) {
-  bool vertical=direction=="top"||direction=="bottom";
+  bool vertical=direction=="top"||direction=="bottom"||direction=="vcenter";
   var keep=new List<string>();
   foreach(string edge in (oldEdges??"").Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries)) {
-   bool edgeVertical=edge=="top"||edge=="bottom";
+   bool edgeVertical=edge=="top"||edge=="bottom"||edge=="vcenter";
    if(edgeVertical!=vertical)keep.Add(edge);
   }
   keep.Add(direction);
-  var order=new[]{"top","bottom","left","right","hcenter"};
+  var order=AllEdges;
   return String.Join(" ",order.Where(x=>keep.Contains(x)).ToArray());
  }
  // Kanten je Programm (Fenster "Kanten je Programm"): angehakte Kanten werden bei "Automatisch" zusammen
  // ausgerichtet; die Schaltflächen Oben/Unten/Links/Rechts richten nur Programme aus, bei denen die Kante angehakt ist.
  // Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig.
  // Gespeichert in Positionen.json ("_edges"); ohne Einstellung gelten diese Vorgaben (Verhalten bis 2.23).
- internal static readonly string[] AllEdges={"top","bottom","left","right","hcenter"};
+ internal static readonly string[] AllEdges={"top","bottom","left","right","hcenter","vcenter"};
  internal static readonly string[] StandardEdges={"top","bottom","left","right"};
  internal static readonly Dictionary<string,string[]> DefaultEdges=new Dictionary<string,string[]>{
   {"taskmanager",new[]{"bottom","right"}},
@@ -473,6 +485,7 @@ public class MainForm:Form {
  string AutoEdges(string id) {
   var set=EdgesFor(id);
   if(set.Contains("left")||set.Contains("right"))set.Remove("hcenter");
+  if(set.Contains("top")||set.Contains("bottom"))set.Remove("vcenter");
   return String.Join(" ",AllEdges.Where(x=>set.Contains(x)).ToArray());
  }
  void EditEdges() {
@@ -500,7 +513,7 @@ public class MainForm:Form {
   Log("Kanten je Programm gespeichert – "+String.Join("; ",lines.ToArray()));
  }
  static string DirectionName(string mode) {
-  switch(mode){case "top":return "Oben";case "bottom":return "Unten";case "left":return "Links";case "right":return "Rechts";case "hcenter":return "Mitte";default:return "Automatisch";}
+  switch(mode){case "top":return "Oben";case "bottom":return "Unten";case "left":return "Links";case "right":return "Rechts";case "hcenter":return "↔ Mitte";case "vcenter":return "↕ Mitte";default:return "Automatisch";}
  }
  async Task AlignWindows(string mode) {
   var selected=list.Rows.Where(x=>x.Checked).ToList();
@@ -524,7 +537,7 @@ public class MainForm:Form {
     try {
      string edges=targetEdges;
      string status=await Task.Run(()=>VisibleAlignment.AlignEntry(entry,gap,edges));
-     if(edges.Contains("hcenter")) {
+     if(entry.Id=="easy2sync"&&edges.Contains("hcenter")) {
       // Bei Easy2Sync auch weitere offene Fenster (z.B. Synchronisation) waagerecht mittig setzen.
       // Weitere Fenster nur waagerecht mittig (ihre Höhe und senkrechte Lage bleiben).
       var extra=await Task.Run(()=>VisibleAlignment.AlignOthers(entry,gap,"hcenter"));

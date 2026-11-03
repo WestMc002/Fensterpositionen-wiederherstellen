@@ -223,8 +223,8 @@ public class AddProgramForm:FixedSizeForm {
 
 // Dialog "Kanten je Programm": je Programm die Kanten festlegen, an denen ausgerichtet wird.
 public class AlignRulesForm:FixedSizeForm {
- static readonly string[] Directions={"top","bottom","left","right","hcenter"};
- static readonly string[] Titles={"Oben","Unten","Links","Rechts","Mitte"};
+ static readonly string[] Directions={"top","bottom","left","right","hcenter","vcenter"};
+ static readonly string[] Titles={"Oben","Unten","Links","Rechts","↔ Mitte","↕ Mitte"};
  readonly List<Entry> programs;
  readonly Dictionary<string,CheckCell[]> cells=new Dictionary<string,CheckCell[]>(StringComparer.OrdinalIgnoreCase);
  public Dictionary<string,HashSet<string>> Rules;
@@ -234,10 +234,10 @@ public class AlignRulesForm:FixedSizeForm {
   Text="Kanten je Programm";
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
-  int w=Ui.Px(600),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
+  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
   Controls.Add(new Label{Text="Kanten je Programm",Font=Ui.HeadingFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,Bounds=new Rectangle(pad,y,inner,Ui.Px(32))});
   y+=Ui.Px(34);
-  Controls.Add(new Label{Text="„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig). Oben, Unten, Links und Rechts richten nur Programme aus, bei denen die Kante angehakt ist.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(60))});
+  Controls.Add(new Label{Text="„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite, ↔ Mitte = waagerecht, ↕ Mitte = senkrecht mittig). Die einzelnen Schaltflächen richten nur Programme aus, bei denen die Spalte angehakt ist.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(60))});
   y+=Ui.Px(66);
   int head=Ui.Px(36),rowH=Ui.Px(40),colW=Ui.Px(66);
   int visibleRows=Math.Max(1,Math.Min(programs.Count,9));
