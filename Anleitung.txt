@@ -1,6 +1,6 @@
 FENSTERPOSITIONEN
 ================
-Version 2.29 (Build-Datum wird angehängt, z.B. 2.29.2026.1103)
+Version 2.38 (Build-Datum wird angehängt, z.B. 2.38.2026.1103)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -14,6 +14,27 @@ Die gewählten Programme werden beendet, ihre Positionen wiederhergestellt
 und anschließend gestartet. Vor Änderungen werden Sicherungen angelegt.
 Falls das normale Schließen nicht genügt, werden die Prozesse beendet.
 Offene, noch nicht abgeschlossene Arbeiten vorher beenden.
+Danach werden die angehakten Kanten aus "Kanten je Programm" mit ihren
+Abständen ausgerichtet (wie "Automatisch"), auch bei TeamSpeak 3, Easy2Sync
+und eigenen Programmen. Programme ohne angehakte Kante bleiben genau auf
+der gespeicherten Position. "Kanten je Programm" legt also fest, wo ein
+Fenster stehen soll; die gespeicherte Position gilt für alles andere
+(z.B. Breite bei nur Oben/Unten).
+
+Wozu "Positionen speichern", wenn es "Kanten je Programm" gibt?
+"Positionen speichern" merkt sich Lage, Größe und Bildschirm jedes Fensters.
+Das wird weiterhin gebraucht für:
+- alles, was unter "Kanten je Programm" nicht angehakt ist, z.B. die Breite
+  und waagerechte Lage, wenn nur Oben und Unten angehakt sind,
+- den Bildschirm: ausgerichtet wird auf dem Bildschirm, auf dem das Fenster
+  nach dem Wiederherstellen steht,
+- Programme ohne angehakte Kante (z.B. neue eigene Programme),
+- Programme, die neu gestartet werden (Task-Manager, DU Meter, Franz,
+  TeamSpeak 6, Discord, GPU-Z): Sie starten gleich an der gespeicherten
+  Stelle, bevor die Nachkorrektur greift.
+Sind bei einem Programm alle vier Kanten angehakt, legt "Kanten je
+Programm" Lage und Größe vollständig fest; gespeichert werden muss dann
+nur einmal, damit der richtige Bildschirm bekannt ist.
 
 Positionen speichern
 Fenster zuerst an die gewünschten Stellen verschieben.
@@ -33,12 +54,15 @@ Andere Einstellungen in den JSON-Dateien bleiben inhaltlich erhalten;
 die Formatierung der Dateien kann sich ändern.
 
 TeamSpeak 3
-Standardmäßig abgewählt. Wiederherstellen öffnet eine Dateiauswahl für
-eine SQLite-Datenbank (*.db). Diese ersetzt die gesamte settings.db,
-einschließlich weiterer Programmeinstellungen.
-Die bisherige Datenbank wird vorher gesichert und nicht vorab gelöscht.
-"Positionen speichern" sichert bei TeamSpeak 3 die gesamte Datenbank.
-Diese Sicherung kann später über die Dateiauswahl eingespielt werden.
+Wird wie Easy2Sync behandelt: "Positionen speichern" misst das offene
+TeamSpeak-3-Fenster (Position und Größe), "Wiederherstellen" verschiebt es
+direkt. TeamSpeak 3 wird dafür nicht beendet, die settings.db wird nicht
+verändert (Lesezeichen, Identitäten und Einstellungen bleiben unberührt).
+Läuft TeamSpeak 3 nicht, wird es gestartet und das Fenster danach gesetzt;
+TeamSpeak 3 merkt sich die Position beim nächsten Beenden selbst.
+Bis Version 2.30 wurde stattdessen die ganze Datenbank gesichert und ersetzt.
+Nach dem Update einmal bei offenem TeamSpeak 3 "Positionen speichern"
+anklicken. Alte Datenbanksicherungen im Ordner Sicherungen bleiben erhalten.
 
 Speicherorte
 Einstellungsordner (ab Version 2.13):
@@ -62,8 +86,7 @@ GPU-Z als Zeichenfolgen. Sie sind keine direkt importierbaren REG-Dateien.
 
 Fehler
 Jedes Programm erhält eine eigene Statusmeldung; Details stehen im Protokoll.
-Bei fehlenden Berechtigungen (z.B. TeamSpeak 3 unter Programme oder einem
-erhöht gestarteten Task-Manager) kann ein Start als Administrator nötig sein.
+Bei fehlenden Berechtigungen (z.B. einem erhöht gestarteten Task-Manager) kann ein Start als Administrator nötig sein.
 Es wird keine automatische Rechteerhöhung angefordert.
 
 Prüfung
@@ -113,8 +136,8 @@ sind, auf einmal aus (siehe unten).
 Rechts daneben steht der Abstand in Bildschirmpixeln (Standard 18, 0 bis 200);
 der zuletzt verwendete Wert wird gespeichert. Die folgenden Abschnitte nennen
 18 px als Beispiel. Mehrere Richtungen nacheinander ergänzen sich
-(z.B. "Unten" und danach "Links"); die Nachkorrektur beim Start übernimmt
-Kanten und Abstand.
+(z.B. "Unten" und danach "Links"). Die Schaltflächen verschieben nur;
+dauerhaft gilt, was unter "Kanten je Programm" angehakt ist.
 
 Die Schaltfläche "Unten" verschiebt die ausgewählten,
 bereits geöffneten Fenster. Sie misst die sichtbare Unterkante über DWM
@@ -131,6 +154,36 @@ Oben, Unten, Links, Rechts, ↔ Mitte (waagerecht) und ↕ Mitte (senkrecht).
   ↕ Mitte nur, wenn weder Oben noch Unten angehakt ist.
 - Die einzelnen Schaltflächen richten nur Programme aus, bei denen
   diese Spalte angehakt ist; die anderen zeigen "Ausrichten übersprungen".
+- Nicht angehakte Kanten bleiben, wie sie sind (z.B. Links nicht angehakt:
+  die waagerechte Position des Fensters bleibt erhalten).
+Eigener Abstand je Kante: Bei angehaktem Oben, Unten, Links oder Rechts
+erscheint daneben ein Feld für den Abstand in px (0 bis 5000).
+- Feld leer: es gilt der allgemeine Abstand aus der Ausrichten-Zeile.
+- Zahl eingetragen: dieser Abstand gilt nur für dieses Programm und diese
+  Kante, z.B. TeamSpeak 6 oben und unten leer (18 px), links 1200 px.
+- "Messen" übernimmt die aktuellen Abstände des offenen Fensters in die
+  Felder der angehakten Kanten. So lässt sich ein verschobenes Fenster als
+  neue Ausrichtung festlegen: Fenster hinschieben, Kanten anhaken, "Messen",
+  "Speichern".
+- Gemessen wird von der sichtbaren Fensterkante zum Rand des
+  Arbeitsbereichs des Bildschirms, auf dem das Fenster steht.
+- Die eigenen Abstände gelten für "Automatisch", die einzelnen
+  Schaltflächen, "Wiederherstellen" und die Nachkorrektur beim Start.
+  "Standard" leert die Felder und setzt alle Bezüge auf den Bildschirmrand.
+Nachbarprogramm: Unter dem px-Feld steht, wovon der Abstand gilt
+("am Rand ▾"). Ein Klick darauf öffnet die Auswahl: Bildschirmrand oder ein
+anderes Programm der Liste, z.B. bei TeamSpeak 3 "Links: rechts neben
+Discord" mit 18 px. Dann steht die linke Kante von TeamSpeak 3 immer 18 px
+rechts neben Discord, auch wenn Discord breiter oder schmaler wird.
+- Bezug je Kante: Links = rechts neben, Rechts = links neben,
+  Oben = unter, Unten = über dem Nachbarprogramm.
+- "Messen" misst bei solchen Kanten den Abstand zum Nachbarfenster.
+- Beim Ausrichten und Wiederherstellen werden Nachbarprogramme zuerst
+  bearbeitet, wenn sie ebenfalls angehakt sind.
+- Ist das Nachbarprogramm nicht offen, bleibt diese Kante unverändert
+  (Hinweis im Protokoll).
+- Das Fenster muss trotzdem ganz in den Arbeitsbereich passen.
+Gespeichert in Positionen.json (_edgerefs).
 Vorgabe ("Standard", wie bis Version 2.23):
   Task-Manager   Unten, Rechts
   DU Meter       Oben, Rechts
@@ -140,8 +193,22 @@ Vorgabe ("Standard", wie bis Version 2.23):
   Discord        Unten, Links
   Easy2Sync      ↔ Mitte
   GPU-Z          Unten
-  eigene         Oben, Unten, Links, Rechts
-Gespeichert wird in Positionen.json (_edges).
+  eigene         keine Vorgabe (frei wählbar)
+Gespeichert wird in Positionen.json (_edges, eigene Abstände in _edgegaps).
+Ist bei einem Programm keine Kante angehakt (Vorgabe bei eigenen Programmen),
+wird es nicht ausgerichtet und zeigt "Keine Kanten festgelegt".
+
+Einmalig ausrichten: Die Schaltfläche "Einmalig ausrichten" (oben rechts)
+richtet ein beliebiges offenes Fenster aus, ohne es in die Liste aufzunehmen.
+1. "Einmalig ausrichten" anklicken; das Fenster wartet sofort auf die Auswahl.
+2. Auf das gewünschte Fenster klicken (Esc bricht ab). Titel und Programm
+   erscheinen im Dialog; "Fenster anklicken" wählt ein anderes.
+3. Oben, Unten, Links, Rechts, ↔ Mitte oder ↕ Mitte anklicken. Mehrere
+   Richtungen nacheinander ergänzen sich (z.B. "Unten" und "↔ Mitte").
+Es gilt der eingestellte Abstand. Nichts wird gespeichert: keine Position,
+keine Regel und keine Nachkorrektur beim Start. Ergebnis im Protokoll.
+Fenster von Programmen mit Administratorrechten lassen sich nur verschieben,
+wenn dieses Programm ebenfalls als Administrator läuft.
 Minimierte oder maximierte Fenster müssen zuerst normal geöffnet werden.
 Fenstergrößen und horizontale Positionen bleiben erhalten.
 Die Funktion prüft die neue sichtbare Kante und meldet Abweichungen.
@@ -153,19 +220,18 @@ die Dateiverarbeitung getestet und die Oberfläche visuell geprüft.
 Oben und an den Seiten ausrichten
 --------------------------------
 1. TeamSpeak 3, TeamSpeak 6, Franz und Task-Manager normal öffnen.
-2. Diese vier Programme im Positionsprogramm auswählen
-   (TeamSpeak 3 ist anfangs nicht angehakt).
+2. Diese vier Programme im Positionsprogramm auswählen.
 3. "Automatisch" anklicken.
-   TeamSpeak 3 und 6: oben und unten 18 physische Bildschirmpixel; Höhe wird angepasst.
+   TeamSpeak 3: oben 18 physische Bildschirmpixel.
+   TeamSpeak 6: oben und unten 18 physische Bildschirmpixel; Höhe wird angepasst.
    Franz: oben, unten und links jeweils 18 physische Bildschirmpixel; Höhe wird angepasst.
    Task-Manager: rechts 18 physische Bildschirmpixel;
    seine vertikale Position bleibt erhalten.
    Bezugspunkt ist der Arbeitsbereich des jeweiligen Bildschirms.
 4. "Positionen speichern" zum dauerhaften Übernehmen anklicken.
-   Bei TeamSpeak 3 wird dabei die vollständige Datenbank gesichert.
 DU Meter: oben und rechts jeweils 18 physische Bildschirmpixel.
 Discord wird links und unten auf 18 Bildschirmpixel ausgerichtet; die Höhe bleibt erhalten. GPU-Z bleibt bei dieser Schaltfläche unverändert.
-Bei Franz und TeamSpeak 3/6 wird die Höhe an den Arbeitsbereich angepasst; die Breite bleibt erhalten. DU Meter und Task-Manager werden nur verschoben.
+Bei Franz und TeamSpeak 6 wird die Höhe an den Arbeitsbereich angepasst; die Breite bleibt erhalten. DU Meter und Task-Manager werden nur verschoben.
 
 
 DU-Meter-Dienst
@@ -181,14 +247,12 @@ ausgerichtet wurde, aber der Dienstneustart fehlgeschlagen ist.
 Der Dienst wurde beim Entwicklungstest nicht tatsächlich neu gestartet.
 Nachkorrektur beim Start
 -----------------------
-Ausrichtungsregeln werden nun zusätzlich in Positionen.json gespeichert.
 Nach dem Start über "Wiederherstellen" und nach dem Neustart beim Speichern
-werden diese Regeln während der Ladephase erneut angewandt und geprüft.
-Das dauert etwa 14 Sekunden je Programm, bei verzögertem Start bis ca. 27.
-Für ältere Profile gelten als Vorgabe:
-Franz oben/unten/links; Discord unten/links, jeweils 18 Bildschirmpixel.
-Andere Programme erhalten eine Startregel, sobald sie über eine der
-Ausrichtungsschaltflächen ausgerichtet wurden.
+werden die angehakten Kanten aus "Kanten je Programm" (mit eigenen
+Abständen und Nachbarprogrammen) während der Ladephase erneut angewandt und
+geprüft. Das dauert etwa 14 Sekunden je Programm, bei verzögertem Start bis
+ca. 27. Programme ohne angehakte Kante werden nicht nachkorrigiert.
+Bis Version 2.32 galt stattdessen die zuletzt benutzte Ausrichtung.
 Beim DU Meter erfolgt nach der Startkorrektur ebenfalls ein Dienstneustart.
 Direkte Starts über Windows-Verknüpfungen oder Autostart werden nicht überwacht.
 Das Positionsprogramm muss die Programme selbst starten, damit es nachkorrigiert.
@@ -239,9 +303,12 @@ sein Fenster nicht verschieben (Meldung "Zugriff verweigert"). Dann oben auf
 (Titelleiste zeigt "(Administrator)").
 "Automatisch" setzt Easy2Sync (Vorgabe: nur ↔ Mitte) waagerecht mittig;
 Größe und Höhe bleiben erhalten. Danach "Positionen speichern" anklicken.
-Dabei werden auch weitere offene Easy2Sync-Fenster (z.B. das Fenster
-"Synchronisation: ...") waagerecht mittig gesetzt. Easy2Sync merkt sich deren
-Position beim Schließen selbst. Ist das Fenster gerade nicht offen, bleibt es
+Weitere offene Easy2Sync-Fenster (z.B. das Fenster "Synchronisation: ...")
+werden nach jedem Ausrichten und Wiederherstellen von Easy2Sync waagerecht
+mittig über dem Easy2Sync-Hauptfenster gesetzt, unabhängig von den Kanten
+unter "Kanten je Programm". Größe, Höhe und senkrechte Lage bleiben; ragt
+das Fenster dann aus dem Bildschirm, wird es hineingeschoben.
+Easy2Sync merkt sich deren Position beim Schließen selbst. Ist das Fenster gerade nicht offen, bleibt es
 unverändert; dann beim nächsten Mal mit offenem Fenster erneut klicken.
 
 Programme ausblenden
@@ -262,12 +329,12 @@ jedes geöffnete Fenster aufnehmen, z.B. Browser, Explorer-Programme oder Tools.
 2. "Programm hinzufügen" anklicken, das Fenster in der Liste auswählen und
    bei Bedarf den Namen ändern, dann "Hinzufügen".
    Die aktuelle Position und Größe werden dabei gleich gespeichert.
-Eigene Programme werden wie Easy2Sync behandelt: Sie werden nie beendet,
+Eigene Programme werden wie Easy2Sync und TeamSpeak 3 behandelt: Sie werden nie beendet,
 "Positionen speichern" misst das offene Fenster, "Wiederherstellen" verschiebt
 es zurück. Läuft das Programm nicht, wird es gestartet (sofern der
 Programmpfad bekannt ist) und das Fenster danach gesetzt.
 Ausrichten gilt auch für eigene Programme; ihre Kanten legst du unter
-"Kanten je Programm" fest (Vorgabe: Oben, Unten, Links und Rechts).
+"Kanten je Programm" fest (Vorgabe: keine, frei wählbar).
 Erkannt wird das Programm am Prozessnamen (z.B. notepad.exe); es wird sein
 Hauptfenster verwendet. In der Liste steht hinter dem Namen "Eigenes".
 Entfernen: Rechtsklick auf die Zeile > "… entfernen". Dabei wird auch die
@@ -349,6 +416,26 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.37 bis 2.38  Hinweistext und Tooltips erklären "Positionen speichern" und
+               "Wiederherstellen" zusammen mit "Kanten je Programm".
+2.34 bis 2.36  Weitere Easy2Sync-Fenster immer waagerecht mittig über dem
+               Hauptfenster. Programme ohne gemeldetes Hauptfenster (z.B.
+               DU Meter) werden über ihr größtes sichtbares Fenster erkannt.
+               Weicht ein Abstand durch Windows-Rundung ab, steht der
+               Zielwert im Protokoll.
+2.33           "Wiederherstellen" richtet danach die angehakten Kanten aus
+               "Kanten je Programm" aus (auch TeamSpeak 3, Easy2Sync, eigene);
+               die Nachkorrektur beim Start verwendet ebenfalls die Tabelle.
+               Abstand zu einem Nachbarprogramm je Kante ("rechts neben
+               Discord"), "Messen" misst auch den Abstand zum Nachbarn.
+2.32           Kanten je Programm: eigener Abstand in px je Kante und Programm,
+               "Messen" übernimmt die aktuellen Abstände des offenen Fensters.
+2.31           TeamSpeak 3: nur noch das Fenster wird gemessen und verschoben
+               (wie Easy2Sync); die Datenbank wird nicht mehr ersetzt, die
+               Dateiauswahl beim Wiederherstellen entfällt.
+2.30           "Einmalig ausrichten": beliebiges offenes Fenster anklicken und
+               ausrichten, ohne es in die Liste aufzunehmen. Eigene Programme
+               haben keine Kanten-Vorgabe mehr (frei wählbar).
 2.29           Neue Schaltflächen "↔ Mitte" und "↕ Mitte" (waagerecht bzw.
                senkrecht mittig ausrichten), auch als Spalten unter "Kanten
                je Programm"; diese Schaltfläche steht jetzt oben in der

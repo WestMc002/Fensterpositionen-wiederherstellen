@@ -24,7 +24,7 @@ public class MainForm:Form {
  // Demo-Ansicht für die Screenshots (--screenshots): ohne eigene Programme und ohne Datenübernahme.
  public static bool DemoMode;
  ProgramList list=new ProgramList();
- ModernButton restore,save,all,folder,admin,addProgram;
+ ModernButton restore,save,all,folder,admin,addProgram,oneTime;
  // Ausrichten: je eine Schaltfläche pro Kante und "Automatisch" (Regeln je Programm), Abstand frei wählbar.
  ModernButton alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules;
  readonly TextBox gapBox=new TextBox();
@@ -75,6 +75,9 @@ public class MainForm:Form {
   alignVCenter=new ModernButton("↕ Mitte",ButtonKind.Secondary,null);
   alignAuto=new ModernButton("Automatisch",ButtonKind.Secondary,"\uE740");
   folder=new ModernButton("Sicherungen öffnen",ButtonKind.Secondary,"");
+  // Beliebiges offenes Fenster einmalig ausrichten, ohne es in die Liste aufzunehmen.
+  oneTime=new ModernButton("Einmalig ausrichten",ButtonKind.Secondary,"\uE7C9");
+  oneTime.Margin=new Padding(0);
   all=new ModernButton("Alle auswählen",ButtonKind.Ghost,null);
   all.Height=Ui.Px(32);all.Margin=new Padding(0);folder.Margin=new Padding(0);
   addProgram=new ModernButton("Programm hinzufügen",ButtonKind.Ghost,"\uE710");
@@ -88,6 +91,8 @@ public class MainForm:Form {
   // Globale Richtlinie: links "© <Jahr> · <Programmname>".
   footer.Caption="© "+DateTime.Now.Year+" · "+AppInfo.Product;
   header.Controls.Add(folder);
+  header.Controls.Add(oneTime);
+  oneTime.Click+=(s,e)=>AlignOneWindow();
   if(!elevated) {
    // Manche Programme (z.B. Easy2Sync) laufen mit Administratorrechten; ihre Fenster lassen sich nur mit gleichen Rechten verschieben.
    admin=new ModernButton("Als Administrator",ButtonKind.Secondary,"\uE7EF");
@@ -98,6 +103,8 @@ public class MainForm:Form {
   header.Resize+=(s,e)=>{
    folder.Location=new Point(header.Width-folder.Width,(header.Height-folder.Height)/2);
    if(admin!=null)admin.Location=new Point(folder.Left-Ui.Px(8)-admin.Width,(header.Height-admin.Height)/2);
+   int oneTimeRight=(admin!=null?admin.Left:folder.Left)-Ui.Px(8);
+   oneTime.Location=new Point(oneTimeRight-oneTime.Width,(header.Height-oneTime.Height)/2);
   };
 
   activity.Dock=DockStyle.Fill;activity.Margin=new Padding(0,0,0,Ui.Px(14));
@@ -149,6 +156,9 @@ public class MainForm:Form {
   alignTips.SetToolTip(alignBottom,"Ausgewählte Fenster an die Unterkante des Arbeitsbereichs setzen (z.B. über die Taskleiste)");
   alignTips.SetToolTip(alignLeft,"Ausgewählte Fenster an den linken Rand setzen");
   alignTips.SetToolTip(alignRight,"Ausgewählte Fenster an den rechten Rand setzen");
+  alignTips.SetToolTip(oneTime,"Ein beliebiges offenes Fenster anklicken und einmalig ausrichten\r\n(wird nicht in die Liste aufgenommen, nichts wird gespeichert)");
+  alignTips.SetToolTip(save,"Lage, Größe und Bildschirm der ausgewählten Fenster merken.\r\nNötig für alles, was unter „Kanten je Programm“ nicht angehakt ist (z.B. die Breite bei nur Oben/Unten),\r\nund für Programme ohne angehakte Kante.");
+  alignTips.SetToolTip(restore,"Gespeicherte Lage, Größe und Bildschirm wiederherstellen,\r\ndanach die angehakten Kanten aus „Kanten je Programm“ ausrichten.");
   alignTips.SetToolTip(alignHCenter,"Ausgewählte Fenster waagerecht mittig setzen (gleicher Abstand links und rechts)");
   alignTips.SetToolTip(alignVCenter,"Ausgewählte Fenster senkrecht mittig setzen (gleicher Abstand oben und unten)");
   alignTips.SetToolTip(alignAuto,"Alle angehakten Kanten aus „Kanten je Programm“ auf einmal ausrichten\r\n(Oben + Unten = volle Höhe, Links + Rechts = volle Breite, ↔/↕ Mitte = mittig)");
@@ -156,9 +166,9 @@ public class MainForm:Form {
 
   hint.Dock=DockStyle.Fill;hint.Margin=new Padding(0,0,0,Ui.Px(14));
   // Drei kurze Zeilen, je ein Thema, damit nichts mitten im Satz umbricht.
-  hint.Text="Ausgewählte Programme werden beendet und beim Wiederherstellen danach gestartet.\r\n"+
-   "Easy2Sync und eigene Programme bleiben offen – nur ihr Fenster wird verschoben. Rechtsklick auf ein Programm: ausblenden bzw. entfernen.\r\n"+
-   "TeamSpeak 3: vollständige Datenbanksicherung mit manueller Dateiauswahl.";
+  hint.Text="„Positionen speichern“ merkt sich Lage, Größe und Bildschirm; „Wiederherstellen“ setzt sie zurück und richtet danach die Kanten aus „Kanten je Programm“ aus.\r\n"+
+   "Dafür werden die Programme beendet und neu gestartet – TeamSpeak 3, Easy2Sync und eigene Programme bleiben offen.\r\n"+
+   "Rechtsklick auf ein Programm: ausblenden bzw. entfernen.";
 
   var logCard=new Card{Dock=DockStyle.Fill,Margin=new Padding(0),Padding=new Padding(Ui.Px(16),Ui.Px(6),Ui.Px(8),Ui.Px(12))};
   var logTitle=new Label{Text="Protokoll",Dock=DockStyle.Top,Height=Ui.Px(36),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,TextAlign=ContentAlignment.MiddleLeft};
@@ -192,7 +202,8 @@ public class MainForm:Form {
   Rectangle work=Screen.PrimaryScreen.WorkingArea;
   ClientSize=new Size(Ui.Px(1080),fixedHeight+programsHeight+Ui.Px(230));
   int chrome=Height-ClientSize.Height;
-  MinimumSize=new Size(Math.Min(Ui.Px(1000),work.Width),Math.Min(fixedHeight+programsHeight+Ui.Px(120)+chrome,work.Height));
+  // Mindestbreite = Startbreite: sonst überlappen Kopfzeile und Ausrichten-Zeile.
+  MinimumSize=new Size(Math.Min(Width,work.Width),Math.Min(fixedHeight+programsHeight+Ui.Px(120)+chrome,work.Height));
   if(Height>work.Height)Height=work.Height;
   if(Width>work.Width)Width=work.Width;
 
@@ -365,7 +376,7 @@ public class MainForm:Form {
  }
  void SetBusy(bool on) {
   busy=on;list.Enabled=!on;
-  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules,folder,admin,addProgram})if(button!=null)button.Enabled=!on;
+  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules,folder,admin,addProgram,oneTime})if(button!=null)button.Enabled=!on;
   activity.Active=on;
  }
  static string Quote(string s){return "\""+s+"\"";}
@@ -376,7 +387,8 @@ public class MainForm:Form {
   entries.Add(new Entry{Id="taskmanager",Name="Task-Manager",ProcessName="Taskmgr",Exe=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","Taskmgr.exe"),File=Path.Combine(local,"Microsoft","Windows","TaskManager","settings.json"),Keys=new[]{"FullPosition","SmallPosition","FullViewDefaultSize"}});
   entries.Add(new Entry{Id="dumeter",Name="DU Meter",ProcessName="DUMeter",Exe=@"C:\Program Files (x86)\DU Meter\DUMeter.exe",Registry=true,RegistryPath=@"Software\Hagel\DU Meter\Window",Keys=new[]{"WindowPosition"}});
   entries.Add(new Entry{Id="franz",Name="Franz",ProcessName="Franz",Exe=Path.Combine(local,"Programs","franz","Franz.exe"),File=Path.Combine(roam,"Franz","app-state.json"),Keys=new[]{"windowState"}});
-  entries.Add(new Entry{Id="ts3",Name="TeamSpeak 3",ProcessName="ts3client_win64",Exe=@"C:\Program Files (x86)\TeamSpeak 3\ts3client_win64.exe",File=@"C:\Program Files (x86)\TeamSpeak 3\config\settings.db"});
+  // TeamSpeak 3 (ab 2.31): Fenster direkt messen und verschieben wie Easy2Sync; die settings.db bleibt unberührt.
+  entries.Add(new Entry{Id="ts3",Name="TeamSpeak 3",ProcessName="ts3client_win64",Exe=@"C:\Program Files (x86)\TeamSpeak 3\ts3client_win64.exe",WindowOnly=true,Keys=new[]{"Window"}});
   entries.Add(new Entry{Id="ts6",Name="TeamSpeak 6",ProcessName="TeamSpeak",Exe=@"C:\Program Files\TeamSpeak 6\TeamSpeak.exe",File=Path.Combine(roam,"TeamSpeak","Default","placement.json"),Keys=new[]{"ts_main_window"}});
   entries.Add(new Entry{Id="discord",Name="Discord",ProcessName="Discord",Exe=Path.Combine(local,"Discord","Update.exe"),Args="--processStart Discord.exe",File=Path.Combine(roam,"discord","settings.json"),Keys=new[]{"WINDOW_BOUNDS","IS_MAXIMIZED","IS_MINIMIZED"}});
   string e2sDir=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),"Easy2Sync");
@@ -424,35 +436,11 @@ public class MainForm:Form {
    profiles=copy;
   } catch(Exception ex) {Log("Abstand konnte nicht gespeichert werden: "+ex.Message);}
  }
- // Gespeicherte Regel "Kanten" oder "Kanten:Abstand" (ältere Regeln ohne Abstand: 18 px).
- static void ParseRule(string rule,out string edges,out int gap) {
-  edges=rule??"";gap=DefaultGap;
-  int colon=edges.IndexOf(':');
-  if(colon>=0) {
-   int value;
-   if(Int32.TryParse(edges.Substring(colon+1),out value))gap=ClampGap(value);
-   edges=edges.Substring(0,colon);
-  }
-  edges=edges.Trim();
- }
- // Einzelne Richtung in eine vorhandene Regel einfügen: gleiche Achse ersetzen, andere Achse behalten.
- static string MergeRule(string oldEdges,string direction) {
-  bool vertical=direction=="top"||direction=="bottom"||direction=="vcenter";
-  var keep=new List<string>();
-  foreach(string edge in (oldEdges??"").Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries)) {
-   bool edgeVertical=edge=="top"||edge=="bottom"||edge=="vcenter";
-   if(edgeVertical!=vertical)keep.Add(edge);
-  }
-  keep.Add(direction);
-  var order=AllEdges;
-  return String.Join(" ",order.Where(x=>keep.Contains(x)).ToArray());
- }
  // Kanten je Programm (Fenster "Kanten je Programm"): angehakte Kanten werden bei "Automatisch" zusammen
  // ausgerichtet; die Schaltflächen Oben/Unten/Links/Rechts richten nur Programme aus, bei denen die Kante angehakt ist.
  // Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig.
  // Gespeichert in Positionen.json ("_edges"); ohne Einstellung gelten diese Vorgaben (Verhalten bis 2.23).
  internal static readonly string[] AllEdges={"top","bottom","left","right","hcenter","vcenter"};
- internal static readonly string[] StandardEdges={"top","bottom","left","right"};
  internal static readonly Dictionary<string,string[]> DefaultEdges=new Dictionary<string,string[]>{
   {"taskmanager",new[]{"bottom","right"}},
   {"dumeter",new[]{"top","right"}},
@@ -463,10 +451,10 @@ public class MainForm:Form {
   {"easy2sync",new[]{"hcenter"}},
   {"gpuz",new[]{"bottom"}}
  };
- // Vorgabe für ein Programm: Tabelle oben, sonst (z.B. eigene Programme) alle vier Kanten ohne Mitte.
+ // Vorgabe für ein Programm: Tabelle oben; eigene Programme haben keine Vorgabe (frei wählbar).
  internal static HashSet<string> DefaultEdgesFor(string id) {
   string[] edges;
-  return new HashSet<string>(DefaultEdges.TryGetValue(id,out edges)?edges:StandardEdges);
+  return new HashSet<string>(DefaultEdges.TryGetValue(id,out edges)?edges:new string[0]);
  }
  HashSet<string> EdgesFor(string id) {
   var saved=profiles!=null&&profiles.ContainsKey("_edges")?profiles["_edges"] as Dictionary<string,object>:null;
@@ -478,6 +466,75 @@ public class MainForm:Form {
   }
   return DefaultEdgesFor(id);
  }
+ // Eigene Abstände je Kante ("_edgegaps"): fehlt ein Wert, gilt der allgemeine Abstand.
+ internal const int MaxEdgeGap=5000;
+ Dictionary<string,int> GapsFor(string id) {
+  var result=new Dictionary<string,int>();
+  var saved=profiles!=null&&profiles.ContainsKey("_edgegaps")?profiles["_edgegaps"] as Dictionary<string,object>:null;
+  if(saved==null||!saved.ContainsKey(id))return result;
+  var values=saved[id] as Dictionary<string,object>;
+  if(values==null)return result;
+  foreach(var pair in values) {
+   try {result[pair.Key]=Math.Max(0,Math.Min(MaxEdgeGap,Convert.ToInt32(pair.Value)));} catch {}
+  }
+  return result;
+ }
+ string WithGaps(string id,string edges) {
+  var gaps=GapsFor(id);
+  return String.Join(" ",(edges??"").Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries).Select(x=>gaps.ContainsKey(x)?x+"="+gaps[x]:x).ToArray());
+ }
+ // Nachbarprogramm je Kante ("_edgerefs"): Kante richtet sich an der gegenüberliegenden Kante dieses Programms aus
+ // (z.B. Links an Discord = linke Kante x px rechts neben Discord). Ohne Eintrag gilt der Bildschirmrand.
+ Dictionary<string,string> RefsFor(string id) {
+  var result=new Dictionary<string,string>();
+  var saved=profiles!=null&&profiles.ContainsKey("_edgerefs")?profiles["_edgerefs"] as Dictionary<string,object>:null;
+  if(saved==null||!saved.ContainsKey(id))return result;
+  var values=saved[id] as Dictionary<string,object>;
+  if(values==null)return result;
+  foreach(var pair in values)if(pair.Value!=null&&Convert.ToString(pair.Value).Length>0)result[pair.Key]=Convert.ToString(pair.Value);
+  return result;
+ }
+ Entry EntryById(string id){return entries.FirstOrDefault(x=>String.Equals(x.Id,id,StringComparison.OrdinalIgnoreCase));}
+ // Kanten mit Nachbarprogramm um die Bezugslinie ergänzen (">x"); ist der Nachbar nicht offen, bleibt die Kante unverändert.
+ string Resolve(string id,string edges,List<string> notes) {
+  var refs=RefsFor(id);
+  if(refs.Count==0)return edges;
+  var result=new List<string>();
+  foreach(string token in (edges??"").Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries)) {
+   string name=token.Split('=')[0];
+   string refId;
+   Entry neighbor=refs.TryGetValue(name,out refId)?EntryById(refId):null;
+   if(neighbor==null){result.Add(token);continue;}
+   Rectangle r;
+   if(!VisibleAlignment.TryVisibleRect(neighbor,out r)) {
+    if(notes!=null)notes.Add(DirectionName(name)+" unverändert ("+neighbor.Name+" ist nicht offen)");
+    continue;
+   }
+   int line=name=="left"?r.Right:name=="right"?r.Left:name=="top"?r.Bottom:r.Top;
+   result.Add(token+">"+line);
+   if(notes!=null)notes.Add(DirectionName(name)+" an "+neighbor.Name);
+  }
+  return String.Join(" ",result.ToArray());
+ }
+ // Reihenfolge: Programme, an denen sich andere ausrichten, zuerst (Kreisbezüge werden einfach übergangen).
+ List<ProgramRow> OrderByNeighbors(List<ProgramRow> rows) {
+  var result=new List<ProgramRow>();
+  var done=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  var visiting=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  Action<ProgramRow> visit=null;
+  visit=row=>{
+   string id=row.Entry.Id;
+   if(done.Contains(id)||visiting.Contains(id))return;
+   visiting.Add(id);
+   foreach(string refId in RefsFor(id).Values) {
+    var before=rows.FirstOrDefault(x=>String.Equals(x.Entry.Id,refId,StringComparison.OrdinalIgnoreCase));
+    if(before!=null)visit(before);
+   }
+   visiting.Remove(id);done.Add(id);result.Add(row);
+  };
+  foreach(var row in rows)visit(row);
+  return result;
+ }
  bool Skipped(string mode,string id) {
   return mode!="auto"&&!EdgesFor(id).Contains(mode);
  }
@@ -488,19 +545,40 @@ public class MainForm:Form {
   if(set.Contains("top")||set.Contains("bottom"))set.Remove("vcenter");
   return String.Join(" ",AllEdges.Where(x=>set.Contains(x)).ToArray());
  }
+ // Einmalig ausrichten: ein angeklicktes Fenster ausrichten; nichts wird gespeichert.
+ void AlignOneWindow() {
+  if(busy)return;
+  using(var dialog=new OneTimeAlignForm(Icon,()=>CurrentGap(),Log)) dialog.ShowDialog(this);
+ }
  void EditEdges() {
   if(busy)return;
   var current=new Dictionary<string,HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-  foreach(var e in entries)current[e.Id]=EdgesFor(e.Id);
+  var currentGaps=new Dictionary<string,Dictionary<string,int>>(StringComparer.OrdinalIgnoreCase);
+  var currentRefs=new Dictionary<string,Dictionary<string,string>>(StringComparer.OrdinalIgnoreCase);
+  foreach(var e in entries){current[e.Id]=EdgesFor(e.Id);currentGaps[e.Id]=GapsFor(e.Id);currentRefs[e.Id]=RefsFor(e.Id);}
   Dictionary<string,HashSet<string>> result;
-  using(var dialog=new AlignRulesForm(Icon,entries,current)) {
+  Dictionary<string,Dictionary<string,int>> resultGaps;
+  Dictionary<string,Dictionary<string,string>> resultRefs;
+  using(var dialog=new AlignRulesForm(Icon,entries,current,currentGaps,currentRefs,CurrentGap())) {
    if(dialog.ShowDialog(this)!=DialogResult.OK)return;
-   result=dialog.Rules;
+   result=dialog.Rules;resultGaps=dialog.Gaps;resultRefs=dialog.Refs;
   }
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   var saved=copy.ContainsKey("_edges")?copy["_edges"] as Dictionary<string,object>:null;
   if(saved==null){saved=new Dictionary<string,object>();copy["_edges"]=saved;}
   foreach(var pair in result)saved[pair.Key]=AllEdges.Where(x=>pair.Value.Contains(x)).ToList();
+  var savedGaps=copy.ContainsKey("_edgegaps")?copy["_edgegaps"] as Dictionary<string,object>:null;
+  if(savedGaps==null){savedGaps=new Dictionary<string,object>();copy["_edgegaps"]=savedGaps;}
+  foreach(var pair in resultGaps) {
+   if(pair.Value.Count==0)savedGaps.Remove(pair.Key);
+   else savedGaps[pair.Key]=pair.Value.ToDictionary(x=>x.Key,x=>(object)x.Value);
+  }
+  var savedRefs=copy.ContainsKey("_edgerefs")?copy["_edgerefs"] as Dictionary<string,object>:null;
+  if(savedRefs==null){savedRefs=new Dictionary<string,object>();copy["_edgerefs"]=savedRefs;}
+  foreach(var pair in resultRefs) {
+   if(pair.Value.Count==0)savedRefs.Remove(pair.Key);
+   else savedRefs[pair.Key]=pair.Value.ToDictionary(x=>x.Key,x=>(object)x.Value);
+  }
   copy.Remove("_skip");
   try {Store.Write(Store.Profiles,copy);}
   catch(Exception ex) {Log("Kanten je Programm konnten nicht gespeichert werden: "+ex.Message);return;}
@@ -508,7 +586,11 @@ public class MainForm:Form {
   var lines=new List<string>();
   foreach(var e in entries) {
    HashSet<string> set;
-   if(result.TryGetValue(e.Id,out set))lines.Add(e.Name+": "+(set.Count>0?String.Join(", ",AllEdges.Where(x=>set.Contains(x)).Select(x=>DirectionName(x)).ToArray()):"keine"));
+   Dictionary<string,int> gaps;
+   if(!resultGaps.TryGetValue(e.Id,out gaps))gaps=new Dictionary<string,int>();
+   Dictionary<string,string> refs;
+   if(!resultRefs.TryGetValue(e.Id,out refs))refs=new Dictionary<string,string>();
+   if(result.TryGetValue(e.Id,out set))lines.Add(e.Name+": "+(set.Count>0?String.Join(", ",AllEdges.Where(x=>set.Contains(x)).Select(x=>DirectionName(x)+(gaps.ContainsKey(x)?" "+gaps[x]+" px":"")+(refs.ContainsKey(x)&&EntryById(refs[x])!=null?" an "+EntryById(refs[x]).Name:"")).ToArray()):"keine"));
   }
   Log("Kanten je Programm gespeichert – "+String.Join("; ",lines.ToArray()));
  }
@@ -516,7 +598,8 @@ public class MainForm:Form {
   switch(mode){case "top":return "Oben";case "bottom":return "Unten";case "left":return "Links";case "right":return "Rechts";case "hcenter":return "↔ Mitte";case "vcenter":return "↕ Mitte";default:return "Automatisch";}
  }
  async Task AlignWindows(string mode) {
-  var selected=list.Rows.Where(x=>x.Checked).ToList();
+  // Nachbarprogramme zuerst bearbeiten, damit sich andere an ihrer neuen Lage ausrichten.
+  var selected=OrderByNeighbors(list.Rows.Where(x=>x.Checked).ToList());
   if(selected.Count==0){MessageBox.Show(this,"Bitte mindestens ein Programm auswählen.");return;}
   int gap=CurrentGap();
   SaveGap();
@@ -527,6 +610,7 @@ public class MainForm:Form {
    foreach(var item in selected) {
     var entry=item.Entry;
     string targetEdges=mode;
+    if(EdgesFor(entry.Id).Count==0){item.Status="Keine Kanten festgelegt";continue;}
     if(Skipped(mode,entry.Id)){item.Status="Ausrichten übersprungen";continue;}
     if(mode=="auto") {
      // Alle angehakten Kanten aus "Kanten je Programm" auf einmal.
@@ -536,25 +620,20 @@ public class MainForm:Form {
     item.Status="Fensterkante wird gemessen …";
     try {
      string edges=targetEdges;
-     string status=await Task.Run(()=>VisibleAlignment.AlignEntry(entry,gap,edges));
-     if(entry.Id=="easy2sync"&&edges.Contains("hcenter")) {
-      // Bei Easy2Sync auch weitere offene Fenster (z.B. Synchronisation) waagerecht mittig setzen.
-      // Weitere Fenster nur waagerecht mittig (ihre Höhe und senkrechte Lage bleiben).
-      var extra=await Task.Run(()=>VisibleAlignment.AlignOthers(entry,gap,"hcenter"));
+     // Eigene Abstände je Kante (Kanten je Programm) als "left=1200" anhängen.
+     var notes=new List<string>();
+     string withGaps=Resolve(entry.Id,WithGaps(entry.Id,edges),notes);
+     string status=await Task.Run(()=>VisibleAlignment.AlignEntry(entry,gap,withGaps));
+     if(notes.Count>0)status+="; "+String.Join("; ",notes.ToArray());
+     if(entry.Id=="easy2sync") {
+      // Bei Easy2Sync weitere offene Fenster (z.B. Synchronisation) waagerecht mittig über dem Hauptfenster setzen;
+      // ihre Größe und senkrechte Lage bleiben.
+      var extra=await Task.Run(()=>VisibleAlignment.CenterOthersOnMain(entry));
       foreach(string line in extra)Log(entry.Name+" – "+line);
       if(extra.Count>0)status+="; "+extra.Count+" weitere(s) Fenster";
      }
-     var alignedProfiles=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
-     Dictionary<string,object> rules;
-     if(alignedProfiles.ContainsKey("_alignment"))rules=(Dictionary<string,object>)alignedProfiles["_alignment"];
-     else {rules=new Dictionary<string,object>();alignedProfiles["_alignment"]=rules;}
-     // Regel für die Nachkorrektur beim Start: einzelne Richtungen ergänzen die bisherige Regel.
-     string oldEdges;int oldGap;
-     ParseRule(rules.ContainsKey(entry.Id)?Convert.ToString(rules[entry.Id]):"",out oldEdges,out oldGap);
-     string rule=mode=="auto"?edges:MergeRule(oldEdges,mode);
-     rules[entry.Id]=rule+":"+gap;
-     Store.Write(Store.Profiles,alignedProfiles);
-     profiles=alignedProfiles;
+     // Ab 2.33 wird keine eigene Regel mehr gespeichert: Wiederherstellen und die Nachkorrektur beim Start
+     // verwenden immer die Tabelle "Kanten je Programm".
      if(entry.Id=="dumeter") {
       Log("DU Meter ist ausgerichtet. Dienst DUMeterSvc wird neu gestartet …");
       try {await Task.Run(()=>RestartDUMeterService());status+="; Dienst neu gestartet";}
@@ -696,8 +775,9 @@ public class MainForm:Form {
   if(MessageBox.Show(this,"„"+entry.Name+"“ aus der Liste entfernen?\r\nDie gespeicherte Fensterposition wird ebenfalls gelöscht; das Programm selbst bleibt unverändert.","Programm entfernen",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   copy.Remove(entry.Id);
-  if(copy.ContainsKey("_alignment")) {
-   var rules=copy["_alignment"] as Dictionary<string,object>;
+  // Auch Ausrichtungsregel, Kanten und eigene Abstände des Programms entfernen.
+  foreach(string key in new[]{"_alignment","_edges","_edgegaps","_edgerefs"}) {
+   var rules=copy.ContainsKey(key)?copy[key] as Dictionary<string,object>:null;
    if(rules!=null)rules.Remove(entry.Id);
   }
   Store.SetCustomEntries(copy,entries.Where(x=>x!=entry));
@@ -751,15 +831,11 @@ public class MainForm:Form {
   if(remaining.Length==0)return true;
   throw new Exception("Programm ist nach 20 Sekunden noch aktiv (PID: "+ids+"). Bitte vollstaendig beenden und erneut versuchen.");
  }
+ // Nachkorrektur beim Start und nach Wiederherstellen: alle angehakten Kanten aus "Kanten je Programm"
+ // mit ihren eigenen Abständen (wie "Automatisch"); ohne angehakte Kante bleibt die gespeicherte Position.
  string StartupRule(Entry e) {
-  if(profiles.ContainsKey("_alignment")) {
-   var rules=profiles["_alignment"] as Dictionary<string,object>;
-   if(rules!=null && rules.ContainsKey(e.Id))return Convert.ToString(rules[e.Id]);
-  }
-  // Existing profiles predate saved alignment rules.
-  if(e.Id=="franz")return "top bottom left";
-  if(e.Id=="discord")return "bottom left";
-  return null;
+  string edges=AutoEdges(e.Id);
+  return edges.Length==0?null:WithGaps(e.Id,edges);
  }
  void Start(Entry e,bool afterRestore=false) {
   try {StartWithAlignment(e,afterRestore);}
@@ -777,8 +853,8 @@ public class MainForm:Form {
  void StartWithAlignment(Entry e,bool afterRestore) {
   if(!System.IO.File.Exists(e.Exe))throw new FileNotFoundException("Programmdatei fehlt: "+e.Exe);
   Process.Start(new ProcessStartInfo(e.Exe,e.Args??""){WorkingDirectory=Path.GetDirectoryName(e.Exe),UseShellExecute=true});
-  string rule;int gap;
-  ParseRule(StartupRule(e),out rule,out gap);
+  string rule=StartupRule(e);
+  int gap=SavedGap();
   if(String.IsNullOrEmpty(rule))return;
   BeginInvoke((Action)(()=>Log(e.Name+": gestartet; Fensterkante wird waehrend des Starts nachkorrigiert …")));
   // Reapply through the loading phase: Electron can change bounds after its first window appears.
@@ -788,13 +864,15 @@ public class MainForm:Form {
   Thread.Sleep(2000);
   while(timer.ElapsedMilliseconds<25000) {
    try {
-    VisibleAlignment.AlignEntry(e,gap,rule);
+    VisibleAlignment.AlignEntry(e,gap,Resolve(e.Id,rule,null));
     success=true;
     lastError=null;
     // Keep watching through at least twelve seconds of startup.
     if(timer.ElapsedMilliseconds>=12000) {
      Thread.Sleep(1500);
-     string result=VisibleAlignment.AlignEntry(e,gap,rule);
+     var notes=new List<string>();
+     string result=VisibleAlignment.AlignEntry(e,gap,Resolve(e.Id,rule,notes));
+     if(notes.Count>0)result+="; "+String.Join("; ",notes.ToArray());
      if(e.Id=="dumeter" && !afterRestore)RestartDUMeterService();
      BeginInvoke((Action)(()=>Log(e.Name+": nach Start geprueft – "+result)));
      return;
@@ -805,19 +883,12 @@ public class MainForm:Form {
   throw new Exception("Programm gestartet; Ausrichtung nach Start nicht bestaetigt: "+(lastError??(success?"Startphase nicht abgeschlossen.":"Fenster nicht bereit.")));
  }
  async Task Run(bool capture) {
-  var selected=list.Rows.Where(x=>x.Checked).ToList();
+  // Nachbarprogramme zuerst bearbeiten, damit sich andere an ihrer neuen Lage ausrichten.
+  var selected=OrderByNeighbors(list.Rows.Where(x=>x.Checked).ToList());
   if(selected.Count==0){MessageBox.Show(this,"Bitte mindestens ein Programm auswählen.");return;}
-  string tsBackup=null;
-  if(!capture && selected.Any(x=>x.Entry.Id=="ts3")) {
-   using(var dialog=new OpenFileDialog{Title="TeamSpeak-3-Datenbank auswählen (ersetzt alle gespeicherten Einstellungen)",Filter="TeamSpeak-Datenbank (*.db)|*.db",InitialDirectory=@"C:\Program Files (x86)\TeamSpeak 3\config\backup"}) {
-    if(dialog.ShowDialog(this)!=DialogResult.OK)return;
-    tsBackup=dialog.FileName;
-   }
-   // SQLite file signature check before stopping any application.
-   using(var stream=System.IO.File.OpenRead(tsBackup)){
-    byte[] header=new byte[16]; if(stream.Read(header,0,16)!=16 || Encoding.ASCII.GetString(header)!="SQLite format 3\0"){MessageBox.Show(this,"Die Datei ist keine gültige SQLite-Datenbank.");return;}
-   }
-  }
+  // Der eingestellte Abstand gilt auch für das Ausrichten nach dem Wiederherstellen.
+  int gap=CurrentGap();
+  SaveGap();
   SetBusy(true);
   int failures=0;
   try {
@@ -825,11 +896,10 @@ public class MainForm:Form {
     var entry=item.Entry; item.Status="Wird bearbeitet …";
     try {
      var profileCopy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
-     string chosen=tsBackup;
      await Task.Run(()=>{
       // Fensterprogramme (Easy2Sync, eigene) brauchen die Programmdatei nur, wenn sie gestartet werden müssen.
       if(!entry.WindowOnly && !System.IO.File.Exists(entry.Exe))throw new FileNotFoundException("Programmdatei fehlt: "+entry.Exe);
-      if(!capture && entry.Id!="ts3" && !profileCopy.ContainsKey(entry.Id))throw new Exception("Keine Position gespeichert.");
+      if(!capture && !profileCopy.ContainsKey(entry.Id))throw new Exception("Keine Position gespeichert.");
       if(entry.WindowOnly) {
        // Fenster direkt messen bzw. verschieben; das Programm wird dafür nicht beendet.
        if(capture) {
@@ -837,30 +907,38 @@ public class MainForm:Form {
         Store.Write(Store.Profiles,profileCopy);profiles=profileCopy;
        } else {
         var saved=(Dictionary<string,object>)profileCopy[entry.Id];
-        if(!saved.ContainsKey("Window"))throw new Exception("Keine Fensterposition gespeichert.");
+        // z.B. TeamSpeak 3 bis 2.30: dort war statt der Fensterposition die ganze Datenbank gesichert.
+        if(!saved.ContainsKey("Window"))throw new Exception("Keine Fensterposition gespeichert. Fenster öffnen und einmal „Positionen speichern“ anklicken.");
         string placed=VisibleAlignment.RestoreWindow(entry,(Dictionary<string,object>)saved["Window"]);
         BeginInvoke((Action)(()=>Log(entry.Name+": "+placed)));
+        // Danach die angehakten Kanten aus "Kanten je Programm" ausrichten (wie "Automatisch").
+        string rule=StartupRule(entry);
+        if(!String.IsNullOrEmpty(rule)) {
+         string aligned;
+         var notes=new List<string>();
+         try {aligned=VisibleAlignment.AlignEntry(entry,gap,Resolve(entry.Id,rule,notes));}
+         catch(Exception alignError){throw new Exception("Fenster verschoben, Ausrichten fehlgeschlagen: "+alignError.Message);}
+         if(notes.Count>0)aligned+="; "+String.Join("; ",notes.ToArray());
+         BeginInvoke((Action)(()=>Log(entry.Name+": ausgerichtet – "+aligned)));
+        }
+        if(entry.Id=="easy2sync") {
+         // Weitere Easy2Sync-Fenster waagerecht mittig über dem Hauptfenster (Höhe und senkrechte Lage bleiben).
+         var extra=VisibleAlignment.CenterOthersOnMain(entry);
+         BeginInvoke((Action)(()=>{foreach(string line in extra)Log(entry.Name+" – "+line);}));
+        }
        }
        return;
       }
       bool running=Stop(entry);
       try {
-       if(entry.Id=="ts3") {
-        string backup=Store.BackupFile(entry.File,entry.Id);
-        if(capture) profileCopy[entry.Id]=new Dictionary<string,object>{{"backup",backup}};
-        else {
-         if(String.Equals(Path.GetFullPath(chosen),Path.GetFullPath(entry.File),StringComparison.OrdinalIgnoreCase))throw new Exception("Bitte eine separate Backupdatei auswählen.");
-         foreach(string suffix in new[]{"-wal","-shm","-journal"}) if(System.IO.File.Exists(entry.File+suffix))throw new Exception("SQLite-Begleitdatei vorhanden. Datenbank vorsichtshalber nicht ersetzt: "+suffix);
-         System.IO.File.Copy(chosen,entry.File,true);
-        }
-       } else if(capture) profileCopy[entry.Id]=Store.Capture(entry);
+       if(capture) profileCopy[entry.Id]=Store.Capture(entry);
        else Store.Restore(entry,(Dictionary<string,object>)profileCopy[entry.Id]);
        if(capture) {Store.Write(Store.Profiles,profileCopy);profiles=profileCopy;}
       } finally {if(capture && running)Start(entry);}
       if(!capture)Start(entry,true);
      });
      if(capture)profiles=profileCopy;
-     item.Status=capture?"Position gespeichert":entry.WindowOnly?"Fenster verschoben":"Wiederhergestellt und gestartet";
+     item.Status=capture?"Position gespeichert":entry.WindowOnly?(StartupRule(entry)!=null?"Fenster verschoben und ausgerichtet":"Fenster verschoben"):"Wiederhergestellt und gestartet";
      Log(entry.Name+": "+item.Status);
     } catch(Exception ex){failures++;item.Status="Fehler – siehe Protokoll";Log(entry.Name+": "+ex.Message);}
    }

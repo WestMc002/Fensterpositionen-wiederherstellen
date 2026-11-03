@@ -27,10 +27,11 @@ The interface is in German.
 
 - **Save and restore window positions** of selected programs. Built in: Task Manager, DU Meter, Franz, TeamSpeak 3 and 6, Discord, Easy2Sync and GPU-Z.
   - Programs that store their position in a settings file or in the registry are closed, their values are changed and the program is started again. A backup is made before every change.
-  - Easy2Sync and your own programs stay open; their window is measured and moved directly.
+  - TeamSpeak 3, Easy2Sync and your own programs stay open; their window is measured and moved directly (TeamSpeak 3’s database is not touched).
 - **Add any program:** pick any open window, its position and size are saved right away. Remove it again with a right-click.
 - **Only what you use:** built-in programs that are not installed are not shown; others can be hidden with a right-click (and shown again the same way).
-- **Align windows** to the visible window edge: top, bottom, left, right, centred horizontally (“↔ Mitte”) or vertically (“↕ Mitte”), or “Automatisch” with all edges you ticked for the program (top + bottom = full height, left + right = full width). The distance to the edge of the work area is adjustable (default 18 px). Invisible Windows borders and DPI scaling are taken into account.
+- **Align windows** to the visible window edge: top, bottom, left, right, centred horizontally (“↔ Mitte”) or vertically (“↕ Mitte”), or “Automatisch” with all edges you ticked for the program (top + bottom = full height, left + right = full width). The distance to the edge of the work area is adjustable (default 18 px). Invisible Windows borders and DPI scaling are taken into account. Your own programs have no edges preset – tick the ones you want. Each edge can get its own distance per program (e.g. left 1200 px), or take it from the window’s current position with “Messen”. An edge can also keep a distance to a neighbouring program instead of the screen edge (e.g. 18 px right of Discord). “Wiederherstellen” applies these edges after restoring.
+- **Align once:** click any open window and align it without adding it to the list; nothing is saved.
 - **Correction while starting:** saved alignment rules are re-applied while a program loads.
 - Nothing is selected at start – only the checked programs are processed.
 - Restart as administrator with one click (needed for programs running elevated).
@@ -71,10 +72,11 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 
 - **Fensterpositionen sichern und wiederherstellen** für ausgewählte Programme. Fest eingebaut: Task-Manager, DU Meter, Franz, TeamSpeak 3 und 6, Discord, Easy2Sync und GPU-Z.
   - Programme, die ihre Position in einer Einstellungsdatei oder der Registry speichern, werden beendet, die Werte geändert und das Programm wieder gestartet. Vor jeder Änderung wird eine Sicherung angelegt.
-  - Easy2Sync und eigene Programme bleiben offen; ihr Fenster wird direkt gemessen und verschoben.
+  - TeamSpeak 3, Easy2Sync und eigene Programme bleiben offen; ihr Fenster wird direkt gemessen und verschoben (die Datenbank von TeamSpeak 3 bleibt unberührt).
 - **Beliebige Programme hinzufügen:** ein geöffnetes Fenster auswählen, Position und Größe werden gleich gespeichert. Entfernen per Rechtsklick.
 - **Nur was du brauchst:** Fest eingebaute Programme, die nicht installiert sind, erscheinen nicht; andere lassen sich per Rechtsklick ausblenden (und genauso wieder anzeigen).
-- **Fenster ausrichten** an der sichtbaren Fensterkante: oben, unten, links, rechts, waagerecht („↔ Mitte“) oder senkrecht („↕ Mitte“) mittig, oder „Automatisch“ mit allen Kanten, die je Programm angehakt sind (oben + unten = volle Höhe, links + rechts = volle Breite). Der Abstand zum Rand des Arbeitsbereichs ist einstellbar (Standard 18 px). Unsichtbare Windows-Fensterrahmen und DPI-Skalierung werden berücksichtigt.
+- **Fenster ausrichten** an der sichtbaren Fensterkante: oben, unten, links, rechts, waagerecht („↔ Mitte“) oder senkrecht („↕ Mitte“) mittig, oder „Automatisch“ mit allen Kanten, die je Programm angehakt sind (oben + unten = volle Höhe, links + rechts = volle Breite). Der Abstand zum Rand des Arbeitsbereichs ist einstellbar (Standard 18 px). Unsichtbare Windows-Fensterrahmen und DPI-Skalierung werden berücksichtigt. Eigene Programme haben keine Kanten-Vorgabe – die gewünschten selbst anhaken. Jede Kante kann je Programm einen eigenen Abstand bekommen (z. B. links 1200 px) oder ihn mit „Messen“ von der aktuellen Fensterposition übernehmen. Statt zum Bildschirmrand kann eine Kante auch einen Abstand zu einem Nachbarprogramm halten (z. B. 18 px rechts neben Discord). „Wiederherstellen“ richtet diese Kanten danach aus.
+- **Einmalig ausrichten:** ein beliebiges offenes Fenster anklicken und ausrichten, ohne es in die Liste aufzunehmen; nichts wird gespeichert.
 - **Nachkorrektur beim Start:** gespeicherte Ausrichtungen werden während der Ladephase eines Programms erneut angewandt.
 - Beim Start ist nichts angehakt – bearbeitet wird nur, was angehakt ist.
 - Neustart als Administrator per Klick (nötig für Programme, die mit Administratorrechten laufen).

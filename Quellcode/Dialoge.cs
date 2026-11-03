@@ -221,51 +221,244 @@ public class AddProgramForm:FixedSizeForm {
  }
 }
 
+// Dialog "Einmalig ausrichten": ein beliebiges offenes Fenster anklicken und ausrichten,
+// ohne es in die Liste aufzunehmen. Es wird nichts gespeichert (keine Regel, keine Nachkorrektur).
+public class OneTimeAlignForm:FixedSizeForm {
+ [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd,uint flags);
+ [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint processId);
+ [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+ [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd,StringBuilder name,int max);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int max);
+ // Desktop, Taskleiste, Startmenü und Infobereich zählen nicht als Fenster.
+ static readonly string[] IgnoredClasses={"Progman","WorkerW","Shell_TrayWnd","Shell_SecondaryTrayWnd","Windows.UI.Core.CoreWindow","NotifyIconOverflowWindow","TopLevelWindowForOverflowXamlIsland","XamlExplorerHostIslandWindow"};
+ readonly Func<int> gap;
+ readonly Action<string> log;
+ readonly Label windowTitle,windowDetail,status;
+ readonly ModernButton pick;
+ readonly List<ModernButton> directions=new List<ModernButton>();
+ readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=150};
+ readonly uint ownProcess=(uint)Process.GetCurrentProcess().Id;
+ IntPtr target=IntPtr.Zero;
+ string targetName="";
+ bool picking,working;
+ public OneTimeAlignForm(Icon icon,Func<int> gap,Action<string> log) {
+  this.gap=gap;this.log=log;
+  Text="Einmalig ausrichten";
+  StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
+  Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
+  // Bleibt sichtbar, während das Zielfenster angeklickt wird.
+  TopMost=true;KeyPreview=true;
+  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
+  Controls.Add(new Label{Text="Einmalig ausrichten",Font=Ui.HeadingFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,Bounds=new Rectangle(pad,y,inner,Ui.Px(32))});
+  y+=Ui.Px(34);
+  Controls.Add(new Label{Text="Ein beliebiges offenes Fenster anklicken und ausrichten. Es wird nicht in die Liste aufgenommen und nichts gespeichert.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(40))});
+  y+=Ui.Px(48);
+  var card=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(64))};
+  pick=new ModernButton("Fenster anklicken",ButtonKind.Primary,"\uE7C9");
+  pick.Location=new Point(card.Width-Ui.Px(13)-pick.Width,(card.Height-pick.Height)/2);
+  pick.Click+=(s,e)=>StartPick();
+  int textWidth=pick.Left-Ui.Px(28);
+  windowTitle=new Label{Text="Noch kein Fenster gewählt",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(Ui.Px(16),Ui.Px(10),textWidth,Ui.Px(22))};
+  windowDetail=new Label{Text="„Fenster anklicken“ und danach auf das gewünschte Fenster klicken",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(Ui.Px(16),Ui.Px(33),textWidth,Ui.Px(20))};
+  card.Controls.Add(windowTitle);card.Controls.Add(windowDetail);card.Controls.Add(pick);
+  Controls.Add(card);
+  y+=card.Height+Ui.Px(16);
+  string[] modes={"top","bottom","left","right","hcenter","vcenter"};
+  string[] names={"Oben","Unten","Links","Rechts","↔ Mitte","↕ Mitte"};
+  string[] glyphs={"\uE74A","\uE74B","\uE72B","\uE72A",null,null};
+  int x=pad;
+  for(int i=0;i<modes.Length;i++) {
+   var button=new ModernButton(names[i],ButtonKind.Secondary,glyphs[i]);
+   string mode=modes[i],name=names[i];
+   button.Location=new Point(x,y);
+   button.Click+=async(s,e)=>await Apply(mode,name);
+   x+=button.Width+Ui.Px(6);
+   directions.Add(button);Controls.Add(button);
+  }
+  y+=Ui.Px(38)+Ui.Px(12);
+  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
+  Controls.Add(status);
+  y+=status.Height+Ui.Px(8);
+  var close=new ModernButton("Schließen",ButtonKind.Secondary,null);
+  close.DialogResult=DialogResult.Cancel;
+  close.Location=new Point(w-pad-close.Width,y);
+  Controls.Add(close);
+  y+=Ui.Px(38)+Ui.Px(20);
+  ClientSize=new Size(w,y);
+  timer.Tick+=(s,e)=>CheckForeground();
+  FormClosed+=(s,e)=>{timer.Stop();timer.Dispose();};
+  UpdateButtons();
+  // Gleich nach dem Öffnen auf den Klick warten: meist ist genau das gewünscht.
+  Shown+=(s,e)=>StartPick();
+ }
+ protected override void OnKeyDown(KeyEventArgs e) {
+  base.OnKeyDown(e);
+  if(e.KeyCode!=Keys.Escape)return;
+  e.Handled=true;
+  if(picking){StopPick();status.Text="Auswahl abgebrochen.";}
+  else Close();
+ }
+ void UpdateButtons() {
+  bool ready=target!=IntPtr.Zero&&!picking&&!working;
+  foreach(var button in directions)button.Enabled=ready;
+  pick.Enabled=!picking&&!working;
+ }
+ void StartPick() {
+  if(working)return;
+  picking=true;
+  status.Text="Jetzt auf das gewünschte Fenster klicken … (Esc = abbrechen)";
+  timer.Start();
+  UpdateButtons();
+ }
+ void StopPick(){picking=false;timer.Stop();UpdateButtons();}
+ // Das angeklickte Fenster wird zum Vordergrundfenster; eigene Fenster, Desktop und Taskleiste werden übergangen.
+ void CheckForeground() {
+  IntPtr handle=GetForegroundWindow();
+  if(handle==IntPtr.Zero)return;
+  IntPtr root=GetAncestor(handle,2);
+  if(root!=IntPtr.Zero)handle=root;
+  uint process;
+  GetWindowThreadProcessId(handle,out process);
+  if(process==ownProcess||!IsWindowVisible(handle))return;
+  var cls=new StringBuilder(256);
+  GetClassName(handle,cls,cls.Capacity);
+  if(IgnoredClasses.Contains(cls.ToString()))return;
+  var title=new StringBuilder(512);
+  GetWindowText(handle,title,title.Capacity);
+  string processName="";
+  try {using(var p=Process.GetProcessById((int)process))processName=p.ProcessName+".exe";} catch {}
+  target=handle;
+  targetName=title.Length>0?title.ToString():(processName.Length>0?processName:"Fenster");
+  windowTitle.Text=targetName;
+  windowDetail.Text=processName.Length>0?processName:"Prozess nicht lesbar";
+  StopPick();
+  status.Text="Fenster gewählt – jetzt die Richtung anklicken. Mehrere Richtungen nacheinander ergänzen sich.";
+ }
+ async Task Apply(string mode,string name) {
+  if(target==IntPtr.Zero||working||picking)return;
+  if(!IsWindow(target)) {
+   target=IntPtr.Zero;windowTitle.Text="Noch kein Fenster gewählt";windowDetail.Text="Das Fenster ist nicht mehr geöffnet";
+   status.Text="Bitte erneut „Fenster anklicken“.";UpdateButtons();return;
+  }
+  working=true;UpdateButtons();
+  IntPtr handle=target;int pixels=gap();
+  status.Text=name+" …";
+  try {
+   string result=await Task.Run(()=>VisibleAlignment.AlignHandle(handle,pixels,mode));
+   status.Text=result;
+   log("Einmalig ausrichten – "+targetName+": "+result);
+  } catch(Exception ex) {
+   status.Text=ex.Message;
+   log("Einmalig ausrichten – "+targetName+": "+ex.Message);
+  } finally {working=false;UpdateButtons();}
+ }
+}
+
 // Dialog "Kanten je Programm": je Programm die Kanten festlegen, an denen ausgerichtet wird.
 public class AlignRulesForm:FixedSizeForm {
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd,int msg,IntPtr wParam,string lParam);
  static readonly string[] Directions={"top","bottom","left","right","hcenter","vcenter"};
  static readonly string[] Titles={"Oben","Unten","Links","Rechts","↔ Mitte","↕ Mitte"};
+ // Nur Oben/Unten/Links/Rechts haben einen eigenen Abstand; bei Mitte wird gleich verteilt.
+ const int EdgeCount=4;
  readonly List<Entry> programs;
  readonly Dictionary<string,CheckCell[]> cells=new Dictionary<string,CheckCell[]>(StringComparer.OrdinalIgnoreCase);
+ readonly Dictionary<string,TextBox[]> boxes=new Dictionary<string,TextBox[]>(StringComparer.OrdinalIgnoreCase);
+ // Nachbarprogramm je Kante (null = Bildschirmrand) und die Beschriftung darunter.
+ readonly Dictionary<string,string[]> refs=new Dictionary<string,string[]>(StringComparer.OrdinalIgnoreCase);
+ readonly Dictionary<string,Label[]> refLabels=new Dictionary<string,Label[]>(StringComparer.OrdinalIgnoreCase);
+ readonly ContextMenuStrip refMenu=new ContextMenuStrip();
+ readonly Label status;
  public Dictionary<string,HashSet<string>> Rules;
- public AlignRulesForm(Icon icon,IEnumerable<Entry> list,Dictionary<string,HashSet<string>> current) {
+ public Dictionary<string,Dictionary<string,int>> Gaps;
+ public Dictionary<string,Dictionary<string,string>> Refs;
+ public AlignRulesForm(Icon icon,IEnumerable<Entry> list,Dictionary<string,HashSet<string>> current,Dictionary<string,Dictionary<string,int>> currentGaps,Dictionary<string,Dictionary<string,string>> currentRefs,int globalGap) {
   programs=new List<Entry>(list);
+  Refs=new Dictionary<string,Dictionary<string,string>>(StringComparer.OrdinalIgnoreCase);
+  refMenu.Opened+=(s,e)=>MenuStyle.RoundCorners(refMenu);
   Rules=new Dictionary<string,HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+  Gaps=new Dictionary<string,Dictionary<string,int>>(StringComparer.OrdinalIgnoreCase);
   Text="Kanten je Programm";
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
-  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
+  int w=Ui.Px(944),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
   Controls.Add(new Label{Text="Kanten je Programm",Font=Ui.HeadingFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,Bounds=new Rectangle(pad,y,inner,Ui.Px(32))});
   y+=Ui.Px(34);
-  Controls.Add(new Label{Text="„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite, ↔ Mitte = waagerecht, ↕ Mitte = senkrecht mittig). Die einzelnen Schaltflächen richten nur Programme aus, bei denen die Spalte angehakt ist.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(60))});
-  y+=Ui.Px(66);
-  int head=Ui.Px(36),rowH=Ui.Px(40),colW=Ui.Px(66);
-  int visibleRows=Math.Max(1,Math.Min(programs.Count,9));
+  Controls.Add(new Label{Text="Angehakte Kanten werden ausgerichtet, nicht angehakte bleiben, wie sie sind. Neben dem Haken steht der Abstand in px: leer = allgemeiner Abstand ("+globalGap+" px), sonst gilt die Zahl nur für dieses Programm. Darunter steht, wovon der Abstand gilt: vom Bildschirmrand oder von einem Nachbarprogramm (anklicken zum Ändern). „Messen“ übernimmt die aktuellen Abstände des offenen Fensters für die angehakten Kanten.\r\n„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite). Eigene Programme haben keine Vorgabe.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(112))});
+  y+=Ui.Px(118);
+  int head=Ui.Px(36),rowH=Ui.Px(64),edgeW=Ui.Px(124),midW=Ui.Px(70),measureW=Ui.Px(96);
+  int[] colW={edgeW,edgeW,edgeW,edgeW,midW,midW};
+  // Höchstens 8 Zeilen, auf kleinen Bildschirmen weniger (darüber wird gescrollt).
+  int fitRows=(Screen.PrimaryScreen.WorkingArea.Height-y-Ui.Px(200))/rowH;
+  int visibleRows=Math.Max(1,Math.Min(programs.Count,Math.Min(8,fitRows)));
   var card=new Card{Bounds=new Rectangle(pad,y,inner,head+visibleRows*rowH+Ui.Px(10)),Padding=new Padding(Ui.Px(1))};
-  int colX=inner-Ui.Px(12)-Directions.Length*colW;
+  int colX=inner-Ui.Px(12)-colW.Sum()-measureW;
+  int[] colLeft=new int[colW.Length];
+  for(int i=0,x=colX;i<colW.Length;x+=colW[i],i++)colLeft[i]=x;
   var header=new Panel{Dock=DockStyle.Top,Height=head,BackColor=Ui.Surface};
   header.Controls.Add(new Label{Text="Programm",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),0,colX-Ui.Px(16),head)});
   for(int i=0;i<Titles.Length;i++)
-   header.Controls.Add(new Label{Text=Titles[i],Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleCenter,Bounds=new Rectangle(colX+i*colW,0,colW,head)});
+   header.Controls.Add(new Label{Text=Titles[i],Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=i<EdgeCount?ContentAlignment.MiddleLeft:ContentAlignment.MiddleCenter,Bounds=i<EdgeCount?new Rectangle(colLeft[i]+Ui.Px(8),0,colW[i]-Ui.Px(8),head):new Rectangle(colLeft[i],0,colW[i],head)});
   var rows=new Panel{Dock=DockStyle.Fill,AutoScroll=true,BackColor=Ui.Surface};
   rows.HandleCreated+=(s,e)=>Native.DarkScroll(rows);
   for(int r=0;r<programs.Count;r++) {
    var entry=programs[r];
    int top=r*rowH;
-   rows.Controls.Add(new Label{Text=entry.Name+(entry.Custom?"  (Eigenes)":""),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),top,colX-Ui.Px(20),rowH)});
+   rows.Controls.Add(new Label{Text=entry.Name+(entry.Custom?"  (Eigenes)":""),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),top+Ui.Px(6),colX-Ui.Px(20),Ui.Px(32))});
    var row=new CheckCell[Directions.Length];
+   var fields=new TextBox[EdgeCount];
+   var labels=new Label[EdgeCount];
+   var chosen=new string[EdgeCount];
+   Dictionary<string,string> entryRefs;
+   if(!currentRefs.TryGetValue(entry.Id,out entryRefs))entryRefs=new Dictionary<string,string>();
+   int lineTop=top+Ui.Px(6),lineH=Ui.Px(32);
    HashSet<string> allowed;
    if(!current.TryGetValue(entry.Id,out allowed))allowed=MainForm.DefaultEdgesFor(entry.Id);
+   Dictionary<string,int> gaps;
+   if(!currentGaps.TryGetValue(entry.Id,out gaps))gaps=new Dictionary<string,int>();
    for(int i=0;i<Directions.Length;i++) {
-    row[i]=new CheckCell{Bounds=new Rectangle(colX+i*colW,top,colW,rowH),Checked=allowed.Contains(Directions[i])};
+    bool edge=i<EdgeCount;
+    row[i]=new CheckCell{Bounds=edge?new Rectangle(colLeft[i],lineTop,Ui.Px(36),lineH):new Rectangle(colLeft[i],lineTop,colW[i],lineH),Checked=allowed.Contains(Directions[i])};
     rows.Controls.Add(row[i]);
+    if(!edge)continue;
+    // Abstandsfeld erscheint nur bei angehakter Kante.
+    var field=new Card{Bounds=new Rectangle(colLeft[i]+Ui.Px(38),lineTop+(lineH-Ui.Px(30))/2,Ui.Px(58),Ui.Px(30)),Padding=new Padding(Ui.Px(6),Ui.Px(6),Ui.Px(6),0)};
+    var box=new TextBox{Dock=DockStyle.Fill,BorderStyle=BorderStyle.None,TextAlign=HorizontalAlignment.Center,MaxLength=4,Font=Ui.UiFont,BackColor=Ui.Surface,ForeColor=Ui.TextColor};
+    if(gaps.ContainsKey(Directions[i]))box.Text=gaps[Directions[i]].ToString();
+    string cue=globalGap.ToString();
+    box.HandleCreated+=(s,e)=>SendMessage(((TextBox)s).Handle,0x1501,new IntPtr(1),cue);
+    box.KeyPress+=(s,e)=>{if(!Char.IsDigit(e.KeyChar)&&!Char.IsControl(e.KeyChar))e.Handled=true;};
+    field.Controls.Add(box);
+    // Bezug unter dem Feld: "am Rand" oder "an <Programm>"; Klick öffnet die Auswahl.
+    string refId;
+    if(entryRefs.TryGetValue(Directions[i],out refId)&&programs.Any(x=>String.Equals(x.Id,refId,StringComparison.OrdinalIgnoreCase)&&x.Id!=entry.Id))chosen[i]=refId;
+    var refLabel=new Label{Font=Ui.SmallFont,ForeColor=Ui.Accent,BackColor=Ui.Surface,Tag="accent",AutoEllipsis=true,UseMnemonic=false,Cursor=Cursors.Hand,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(colLeft[i]+Ui.Px(4),lineTop+lineH,colW[i]-Ui.Px(8),Ui.Px(20))};
+    var owner=entry;int index=i;
+    refLabel.Click+=(s,e)=>ShowRefMenu(owner,index,(Label)s);
+    field.Visible=refLabel.Visible=row[i].Checked;
+    var cell=row[i];
+    cell.CheckedChanged+=(s,e)=>{field.Visible=cell.Checked;refLabel.Visible=cell.Checked;};
+    rows.Controls.Add(field);rows.Controls.Add(refLabel);
+    fields[i]=box;labels[i]=refLabel;
    }
-   cells[entry.Id]=row;
+   var measure=new ModernButton("Messen",ButtonKind.Ghost,null);
+   measure.Height=Ui.Px(32);measure.Margin=new Padding(0);
+   measure.Location=new Point(colX+colW.Sum()+(measureW-measure.Width)/2,lineTop+(lineH-measure.Height)/2);
+   var measured=entry;
+   measure.Click+=(s,e)=>Measure(measured);
+   rows.Controls.Add(measure);
+   cells[entry.Id]=row;boxes[entry.Id]=fields;refs[entry.Id]=chosen;refLabels[entry.Id]=labels;
+   for(int i=0;i<EdgeCount;i++)UpdateRefLabel(entry.Id,i);
   }
   card.Controls.Add(rows);card.Controls.Add(header);rows.BringToFront();
   Controls.Add(card);
-  y+=card.Height+Ui.Px(20);
-  var standard=new ModernButton("Standard",ButtonKind.Secondary,"");
+  y+=card.Height+Ui.Px(10);
+  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
+  Controls.Add(status);
+  y+=status.Height+Ui.Px(6);
+  var standard=new ModernButton("Standard",ButtonKind.Secondary,"");
   standard.Location=new Point(pad,y);
   standard.Click+=(s,e)=>ResetToDefaults();
   var ok=new ModernButton("Speichern",ButtonKind.Primary,null);
@@ -279,19 +472,81 @@ public class AlignRulesForm:FixedSizeForm {
   y+=Ui.Px(38)+Ui.Px(20);
   ClientSize=new Size(w,y);
  }
+ Entry NeighborOf(string id){return id==null?null:programs.FirstOrDefault(x=>String.Equals(x.Id,id,StringComparison.OrdinalIgnoreCase));}
+ void UpdateRefLabel(string id,int index) {
+  var neighbor=NeighborOf(refs[id][index]);
+  refLabels[id][index].Text=neighbor==null?"am Rand ▾":"an "+neighbor.Name+" ▾";
+ }
+ // Auswahl, wovon der Abstand gilt: Bildschirmrand oder ein anderes Programm der Liste.
+ void ShowRefMenu(Entry entry,int index,Label anchor) {
+  MenuStyle.Prepare(refMenu);
+  refMenu.Items.Add(MenuStyle.TopSpacer());
+  string current=refs[entry.Id][index];
+  refMenu.Items.Add(MenuStyle.Item("Bildschirmrand",current==null?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=null;UpdateRefLabel(entry.Id,index);}));
+  refMenu.Items.Add(new ToolStripSeparator());
+  string side=Directions[index]=="left"?"rechts neben":Directions[index]=="right"?"links neben":Directions[index]=="top"?"unter":"über";
+  foreach(var other in programs) {
+   if(other.Id==entry.Id)continue;
+   var target=other;
+   bool isCurrent=String.Equals(current,other.Id,StringComparison.OrdinalIgnoreCase);
+   refMenu.Items.Add(MenuStyle.Item(side+" "+other.Name,isCurrent?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=target.Id;UpdateRefLabel(entry.Id,index);}));
+  }
+  refMenu.Items.Add(MenuStyle.BottomSpacer());
+  refMenu.Show(anchor,new Point(0,anchor.Height));
+ }
+ // Aktuelle Abstände des offenen Fensters in die Felder der angehakten Kanten übernehmen.
+ void Measure(Entry entry) {
+  var row=cells[entry.Id];var fields=boxes[entry.Id];var chosen=refs[entry.Id];
+  Dictionary<string,int> m;
+  Rectangle own;
+  try {m=VisibleAlignment.MeasureGaps(entry);}
+  catch(Exception ex){status.Text=ex.Message;return;}
+  VisibleAlignment.TryVisibleRect(entry,out own);
+  var taken=new List<string>();
+  for(int i=0;i<EdgeCount;i++) {
+   if(!row[i].Checked)continue;
+   int measured=m[Directions[i]];
+   string suffix="";
+   Entry neighbor=NeighborOf(chosen[i]);
+   if(neighbor!=null) {
+    // Abstand zur gegenüberliegenden Kante des Nachbarprogramms.
+    Rectangle r;
+    if(!VisibleAlignment.TryVisibleRect(neighbor,out r)){taken.Add(Titles[i]+": "+neighbor.Name+" ist nicht offen");continue;}
+    measured=Directions[i]=="left"?own.Left-r.Right:Directions[i]=="right"?r.Left-own.Right:Directions[i]=="top"?own.Top-r.Bottom:r.Top-own.Bottom;
+    suffix=" bis "+neighbor.Name;
+    if(measured<0)suffix+=" (überlappt, 0 gesetzt)";
+   }
+   int value=Math.Max(0,Math.Min(MainForm.MaxEdgeGap,measured));
+   fields[i].Text=value.ToString();
+   taken.Add(Titles[i]+" "+value+" px"+suffix);
+  }
+  string all="oben "+m["top"]+", unten "+m["bottom"]+", links "+m["left"]+", rechts "+m["right"]+" px";
+  status.Text=taken.Count>0?entry.Name+" gemessen ("+all+" zum Rand) – übernommen: "+String.Join(", ",taken.ToArray())+".":entry.Name+" gemessen ("+all+"). Keine Kante angehakt – zuerst die Kanten anhaken, die übernommen werden sollen.";
+ }
  void ResetToDefaults() {
   foreach(var entry in programs) {
    var allowed=MainForm.DefaultEdgesFor(entry.Id);
    var row=cells[entry.Id];
    for(int i=0;i<Directions.Length;i++)row[i].Checked=allowed.Contains(Directions[i]);
+   foreach(var box in boxes[entry.Id])box.Text="";
+   for(int i=0;i<EdgeCount;i++){refs[entry.Id][i]=null;UpdateRefLabel(entry.Id,i);}
   }
+  status.Text="Vorgaben wiederhergestellt (erst mit „Speichern“ übernommen).";
  }
  void Accept() {
   foreach(var entry in programs) {
    var set=new HashSet<string>();
-   var row=cells[entry.Id];
-   for(int i=0;i<Directions.Length;i++)if(row[i].Checked)set.Add(Directions[i]);
-   Rules[entry.Id]=set;
+   var gaps=new Dictionary<string,int>();
+   var row=cells[entry.Id];var fields=boxes[entry.Id];
+   for(int i=0;i<Directions.Length;i++) {
+    if(!row[i].Checked)continue;
+    set.Add(Directions[i]);
+    int value;
+    if(i<EdgeCount&&Int32.TryParse(fields[i].Text.Trim(),out value))gaps[Directions[i]]=Math.Max(0,Math.Min(MainForm.MaxEdgeGap,value));
+   }
+   var entryRefs=new Dictionary<string,string>();
+   for(int i=0;i<EdgeCount;i++)if(row[i].Checked&&refs[entry.Id][i]!=null)entryRefs[Directions[i]]=refs[entry.Id][i];
+   Rules[entry.Id]=set;Gaps[entry.Id]=gaps;Refs[entry.Id]=entryRefs;
   }
   DialogResult=DialogResult.OK;
   Close();
@@ -304,7 +559,8 @@ public class CheckCell:Control {
   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.Selectable,true);
   BackColor=Ui.Surface;Cursor=Cursors.Hand;TabStop=true;
  }
- public bool Checked{get{return isChecked;}set{isChecked=value;Invalidate();}}
+ public event EventHandler CheckedChanged;
+ public bool Checked{get{return isChecked;}set{if(isChecked==value)return;isChecked=value;Invalidate();if(CheckedChanged!=null)CheckedChanged(this,EventArgs.Empty);}}
  protected override void OnMouseClick(MouseEventArgs e){base.OnMouseClick(e);if(e.Button==MouseButtons.Left){Focus();Checked=!Checked;}}
  protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(e.KeyCode==Keys.Space){Checked=!Checked;e.Handled=true;}}
  protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
