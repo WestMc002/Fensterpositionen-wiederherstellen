@@ -1,6 +1,6 @@
 FENSTERPOSITIONEN
 ================
-Version 2.43 (Build-Datum wird angehängt, z.B. 2.43.2026.1106)
+Version 2.44 (Build-Datum wird angehängt, z.B. 2.44.2026.1106)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -446,6 +446,8 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.44           Versions-Plakette senkrecht mittig zu den Großbuchstaben des
+               Namens (vorher etwas zu hoch).
 2.39 bis 2.43  Update-Prüfung über GitHub: beim Start (höchstens täglich) und
                im Info-Fenster (Stand mit Symbol, "Jetzt prüfen", Schalter
                "Automatisch prüfen"); Hinweis mit "Jetzt aktualisieren" und

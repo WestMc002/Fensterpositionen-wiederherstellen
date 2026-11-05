@@ -339,6 +339,22 @@ public class HeaderPanel:Panel {
  public event EventHandler BadgeClick;
  Rectangle badgeRect;
  Font badgeFont;float badgeScale;
+ // Sichtbare Ober- und Unterkante der Großbuchstaben im Namen (relativ zum Textrahmen, NoPadding).
+ int capTop=-1,capBottom=-1;Font capFont;
+ void MeasureCaps(TextFormatFlags flags) {
+  if(capFont==Ui.TitleFont&&capTop>=0)return;
+  capFont=Ui.TitleFont;
+  Size box=TextRenderer.MeasureText("H",Ui.TitleFont,Size.Empty,flags);
+  using(var bmp=new Bitmap(Math.Max(1,box.Width),Math.Max(1,box.Height)))
+  using(var g=Graphics.FromImage(bmp)) {
+   g.Clear(Color.White);
+   TextRenderer.DrawText(g,"H",Ui.TitleFont,new Point(0,0),Color.Black,Color.White,flags);
+   capTop=-1;capBottom=-1;
+   for(int y=0;y<bmp.Height;y++)for(int x=0;x<bmp.Width;x++)
+    if(bmp.GetPixel(x,y).R<128){if(capTop<0)capTop=y;capBottom=y;break;}
+   if(capTop<0){capTop=0;capBottom=box.Height-1;}
+  }
+ }
  readonly ToolTip tip=new ToolTip();
  protected override void OnMouseMove(MouseEventArgs e) {
   base.OnMouseMove(e);
@@ -378,7 +394,11 @@ public class HeaderPanel:Panel {
    if(badgeFont==null||badgeScale!=Ui.S){if(badgeFont!=null)badgeFont.Dispose();badgeFont=new Font("Segoe UI",10.5f*Ui.S,GraphicsUnit.Pixel);badgeScale=Ui.S;}
    Size b=TextRenderer.MeasureText(g,Badge,badgeFont,Size.Empty,flags);
    int h=Ui.Px(21);
-   var pill=new Rectangle(x+title.Width+Ui.Px(12),y+(title.Height-h)/2,b.Width+2*Ui.Px(8),h);
+   // Senkrecht mittig zu den sichtbaren Großbuchstaben des Namens: Der Textrahmen enthält auch die
+   // Unterlänge (z.B. "p"), mittig dazu wirkte die Plakette 2–3 px zu hoch.
+   MeasureCaps(flags);
+   int capMiddle=y+(capTop+capBottom+1)/2;
+   var pill=new Rectangle(x+title.Width+Ui.Px(12),capMiddle-h/2,b.Width+2*Ui.Px(8),h);
    badgeRect=pill;
    using(var path=Ui.Round(pill,h/2))
    using(var brush=new SolidBrush(Ui.Blend(Ui.Bg,Ui.Accent,0.14f)))
