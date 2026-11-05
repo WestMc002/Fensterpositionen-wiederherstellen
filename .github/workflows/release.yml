@@ -98,7 +98,7 @@ jobs:
             '',
             '## Installation',
             '',
-            "1. ``Fensterpositionen-wiederherstellen-$ver.zip`` herunterladen und in einen eigenen Ordner entpacken, z. B. ``C:\Tools\Fensterpositionen wiederherstellen``.",
+            "1. ``Fensterpositionen-wiederherstellen-$ver.zip`` herunterladen und in einen eigenen Ordner mit Schreibrechten entpacken (nötig für die automatische Aktualisierung), z. B. ``C:\Tools\Fensterpositionen wiederherstellen``.",
             '2. `Fensterpositionen wiederherstellen.exe` per Doppelklick starten.',
             '3. Fenster anordnen, Programme anhaken und „Positionen speichern“ anklicken; weitere Programme über „Programm hinzufügen“ aufnehmen.',
             '',
