@@ -34,6 +34,13 @@ public class MainForm:Form {
  readonly ContextMenuStrip rowMenu=new ContextMenuStrip();
  TextBox log=new TextBox();
  InfoBar hint=new InfoBar();
+ // Update-Hinweis oben (nur sichtbar, wenn auf GitHub eine neuere Version liegt).
+ readonly UpdateBar updateBar=new UpdateBar();
+ ReleaseInfo available;
+ // Fehler der letzten Prüfung (für das Info-Fenster), null = kein Fehler.
+ string updateError;
+ // Gesetzt beim Neustart nach einem Update (--nach-update).
+ public static bool AfterUpdate;
  ActivityBar activity=new ActivityBar();
  FooterPanel footer=new FooterPanel();
  Bitmap signature;
@@ -179,9 +186,11 @@ public class MainForm:Form {
 
   int programsHeight=ProgramsHeight(entries.Count);
   int fixedHeight=Ui.Px(76)+Ui.Px(17)+Ui.Px(52)+Ui.Px(52)+Ui.Px(88)+Ui.Px(64)+Ui.Px(18)+Ui.Px(2);
-  layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(Ui.Px(24),Ui.Px(18),Ui.Px(24),Ui.Px(2)),ColumnCount=1,RowCount=8,BackColor=Ui.Bg};
+  layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(Ui.Px(24),Ui.Px(18),Ui.Px(24),Ui.Px(2)),ColumnCount=1,RowCount=9,BackColor=Ui.Bg};
   layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(76)));
+  // Zeile für den Update-Hinweis: Höhe 0, bis eine neuere Version gefunden wird.
+  layout.RowStyles.Add(new RowStyle(SizeType.Absolute,0));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(17)));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,programsHeight));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(52)));
@@ -189,8 +198,12 @@ public class MainForm:Form {
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(88)));
   layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(64)));
-  layout.Controls.Add(header,0,0);layout.Controls.Add(activity,0,1);layout.Controls.Add(programsCard,0,2);
-  layout.Controls.Add(actions,0,3);layout.Controls.Add(alignRow,0,4);layout.Controls.Add(hint,0,5);layout.Controls.Add(logCard,0,6);layout.Controls.Add(footer,0,7);
+  updateBar.Dock=DockStyle.Fill;updateBar.Margin=new Padding(0,0,0,Ui.Px(10));updateBar.Visible=false;
+  updateBar.Install.Click+=async(s,e)=>await InstallUpdate();
+  updateBar.Page.Click+=(s,e)=>OpenReleasePage();
+  updateBar.Later.Click+=(s,e)=>ShowUpdateBar(false);
+  layout.Controls.Add(header,0,0);layout.Controls.Add(updateBar,0,1);layout.Controls.Add(activity,0,2);layout.Controls.Add(programsCard,0,3);
+  layout.Controls.Add(actions,0,4);layout.Controls.Add(alignRow,0,5);layout.Controls.Add(hint,0,6);layout.Controls.Add(logCard,0,7);layout.Controls.Add(footer,0,8);
   Controls.Add(layout);
 
   foreach(var e in entries) list.Add(new ProgramRow{Entry=e,Name=e.Name,Checked=false}); // Beim Start ist nichts angehakt.
@@ -228,6 +241,13 @@ public class MainForm:Form {
   Log("Protokolldatei: "+Store.Display(TraceLog.Today));
   if(skipped!=null)Log("Nicht installiert (nicht angezeigt): "+skipped);
   if(hiddenNames!=null)Log("Ausgeblendet: "+hiddenNames+" – Rechtsklick in die Liste zeigt sie wieder an.");
+  if(AfterUpdate) {
+   string result=Updater.LastResult();
+   if(result!=null&&result.StartsWith("OK"))Log("Update auf Version "+result.Substring(2).Trim()+" installiert.");
+   else if(result!=null)Log("Update fehlgeschlagen: "+result.Replace("FEHLER","").Trim()+" – die bisherige Version läuft weiter.");
+  }
+  // Update-Prüfung still beim Start (höchstens einmal täglich, abschaltbar im Info-Fenster).
+  Shown+=async(s,e)=>await CheckForUpdates(false);
   int customCount=entries.Count(x=>x.Custom);
   if(customCount>0)Log("Eigene Programme: "+customCount);
  }
@@ -282,7 +302,127 @@ public class MainForm:Form {
  }
  void ShowInfo() {
   if(busy)return;
-  using(var about=new AboutForm(signature,Icon,OpenBackups)) about.ShowDialog(this);
+  var hooks=new UpdateHooks{
+   Status=()=>CurrentUpdateStatus(),
+   Auto=()=>UpdateAuto(),
+   SetAuto=on=>SaveUpdateSettings(on,null),
+   CheckNow=()=>CheckForUpdates(true),
+   CanInstall=()=>available!=null&&Updater.InstallBlocker()==null&&!String.IsNullOrEmpty(available.ZipUrl),
+   Install=()=>BeginInvoke((Action)(async()=>await InstallUpdate())),
+   OpenPage=()=>OpenReleasePage()
+  };
+  using(var about=new AboutForm(signature,Icon,OpenBackups,hooks)) about.ShowDialog(this);
+ }
+ // Update-Einstellungen in Positionen.json ("_update": auto = beim Start prüfen, last = letzte Prüfung).
+ Dictionary<string,object> UpdateSettings() {
+  var saved=profiles!=null&&profiles.ContainsKey("_update")?profiles["_update"] as Dictionary<string,object>:null;
+  return saved??new Dictionary<string,object>();
+ }
+ bool UpdateAuto() {
+  var saved=UpdateSettings();
+  try {return !saved.ContainsKey("auto")||Convert.ToBoolean(saved["auto"]);} catch {return true;}
+ }
+ DateTime UpdateLast() {
+  var saved=UpdateSettings();
+  DateTime last;
+  if(saved.ContainsKey("last")&&DateTime.TryParse(Convert.ToString(saved["last"]),System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.RoundtripKind,out last))return last;
+  return DateTime.MinValue;
+ }
+ void SaveUpdateSettings(bool? auto,DateTime? last) {
+  if(DemoMode)return;
+  try {
+   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+   var settings=copy.ContainsKey("_update")?copy["_update"] as Dictionary<string,object>:null;
+   if(settings==null){settings=new Dictionary<string,object>();copy["_update"]=settings;}
+   if(auto.HasValue)settings["auto"]=auto.Value;
+   if(last.HasValue)settings["last"]=last.Value.ToString("o",System.Globalization.CultureInfo.InvariantCulture);
+   Store.Write(Store.Profiles,copy);
+   profiles=copy;
+  } catch(Exception ex) {Log("Update-Einstellung konnte nicht gespeichert werden: "+ex.Message);}
+ }
+ UpdateStatus CurrentUpdateStatus() {
+  DateTime last=UpdateLast();
+  string checkedText=last==DateTime.MinValue?"":"Zuletzt geprüft "+last.ToLocalTime().ToString("dd.MM.yyyy");
+  if(available!=null)return new UpdateStatus{State=UpdateState.Available,Text="Version "+available.Version+" verfügbar",Detail=checkedText};
+  if(updateError!=null)return new UpdateStatus{State=UpdateState.Error,Text="Prüfung nicht möglich",Detail=updateError};
+  if(last==DateTime.MinValue)return new UpdateStatus{State=UpdateState.Unknown,Text="Noch nicht geprüft",Detail=""};
+  return new UpdateStatus{State=UpdateState.Current,Text="Aktuell",Detail=checkedText};
+ }
+ // Neueste Version auf GitHub abfragen. Beim Start (manual=false) höchstens alle 20 Stunden und still.
+ // Das Ergebnis einer Prüfung von Hand zeigt nur das Info-Fenster; im Hauptfenster erscheint nur bei
+ // einer neuen Version die Hinweisleiste. Fehler stehen in der Protokolldatei.
+ async Task<UpdateStatus> CheckForUpdates(bool manual) {
+  if(DemoMode)return CurrentUpdateStatus();
+  if(!manual&&(!UpdateAuto()||(DateTime.UtcNow-UpdateLast().ToUniversalTime()).TotalHours<20))return CurrentUpdateStatus();
+  try {
+   var release=await Task.Run(()=>Updater.GetLatest());
+   SaveUpdateSettings(null,DateTime.UtcNow);
+   updateError=null;
+   if(Updater.IsNewer(release.Version)) {
+    bool fresh=available==null||available.Version!=release.Version;
+    available=release;
+    if(fresh)Log("Neue Version "+release.Version+" auf GitHub verfügbar (installiert: "+AppInfo.Version+").");
+    ShowUpdateBar(true);
+   } else {
+    available=null;
+    ShowUpdateBar(false);
+   }
+  } catch(Exception ex) {
+   updateError=ex.Message;
+   TraceLog.Write("Update-Prüfung nicht möglich: "+ex.Message);
+  }
+  return CurrentUpdateStatus();
+ }
+ void ShowUpdateBar(bool show) {
+  show=show&&available!=null;
+  if(show==updateBar.Visible)return;
+  int height=Ui.Px(64);
+  if(show) {
+   updateBar.Text="Neue Version "+available.Version+" verfügbar – installiert ist "+AppInfo.Version+".";
+   // Im Projektordner öffnet "Jetzt aktualisieren" die Release-Seite (dort wird nie ersetzt).
+   string blocker=Updater.InstallBlocker();
+   alignTips.SetToolTip(updateBar.Install,blocker!=null?blocker+"\r\nKlick öffnet stattdessen die Release-Seite.":"ZIP herunterladen, Programm beenden, EXE und Anleitung ersetzen und neu starten.\r\nGespeicherte Positionen und Einstellungen bleiben erhalten.");
+  }
+  // Fenster um die Hinweiszeile vergrößern bzw. verkleinern, soweit der Bildschirm reicht.
+  Rectangle work=Screen.FromControl(this).WorkingArea;
+  layout.RowStyles[UpdateRow].Height=show?height:0;
+  updateBar.Visible=show;
+  if(WindowState==FormWindowState.Normal) {
+   if(show&&Bottom+height<=work.Bottom)Height+=height;
+   else if(!show&&Height-height>=MinimumSize.Height)Height-=height;
+  }
+ }
+ void OpenReleasePage() {
+  try {Process.Start(available!=null&&!String.IsNullOrEmpty(available.PageUrl)?available.PageUrl:Updater.ReleasesPage);}
+  catch(Exception ex){MessageBox.Show(this,ex.Message);}
+ }
+ async Task InstallUpdate() {
+  if(busy||available==null)return;
+  string blocker=Updater.InstallBlocker();
+  if(blocker!=null||String.IsNullOrEmpty(available.ZipUrl)) {
+   Log((blocker??"Im Release ist keine ZIP-Datei angehängt.")+" Release-Seite wird geöffnet.");
+   OpenReleasePage();
+   return;
+  }
+  if(MessageBox.Show(this,AppInfo.Product+" wird beendet, auf Version "+available.Version+" aktualisiert und neu gestartet. Einstellungen bleiben erhalten.\r\n\r\nJetzt aktualisieren?",
+   "Update",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+  SetBusy(true);
+  foreach(var b in new[]{updateBar.Install,updateBar.Page,updateBar.Later})b.Enabled=false;
+  string text=updateBar.Text;
+  try {
+   Log("Lade Version "+available.Version+" …");
+   await Updater.Install(available,percent=>BeginInvoke((Action)(()=>updateBar.Text="Lade Version "+available.Version+" … "+percent+" %")));
+   Log("Update wird installiert – Fensterpositionen startet gleich neu.");
+   busy=false;
+   Close();
+  } catch(Exception ex) {
+   Log("Update fehlgeschlagen: "+ex.Message);
+   MessageBox.Show(this,ex.Message,"Update",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+   updateBar.Text=text;
+   SetBusy(false);
+   foreach(var b in new[]{updateBar.Page,updateBar.Later})b.Enabled=true;
+   updateBar.Install.Enabled=true;
+  }
  }
  // Eingebettete Ressource suchen; der Name kann einen Ordner enthalten (z.B. "Resources\Fensterpositionen.ico").
  static Stream ResourceStream(string name) {
@@ -646,15 +786,17 @@ public class MainForm:Form {
    Log("Zum dauerhaften Übernehmen der ausgerichteten Fenster jetzt Positionen speichern.");
   } finally {SetBusy(false);}
  }
+ // Zeilen im Layout: 0 Kopf, 1 Update-Hinweis, 2 Aktivität, 3 Programme, 4 Aktionen, 5 Ausrichten, 6 Hinweis, 7 Protokoll, 8 Footer.
+ const int UpdateRow=1,ProgramsRow=3;
  // Höhe des Programmbereichs: bis zu 12 Zeilen sichtbar, darüber wird die Liste gescrollt.
  int ProgramsHeight(int count){return list.RowHeight*Math.Max(1,Math.Min(count,12))+Ui.Px(44)+Ui.Px(16)+Ui.Px(14)+2;}
  // Nach Hinzufügen/Entfernen: Programmbereich anpassen, das Fenster wächst bzw. schrumpft mit (begrenzt auf den Bildschirm).
  void UpdateProgramsHeight() {
   if(layout==null)return;
   int target=ProgramsHeight(list.Rows.Count);
-  int delta=target-(int)layout.RowStyles[2].Height;
+  int delta=target-(int)layout.RowStyles[ProgramsRow].Height;
   if(delta==0)return;
-  layout.RowStyles[2].Height=target;
+  layout.RowStyles[ProgramsRow].Height=target;
   Rectangle work=Screen.FromControl(this).WorkingArea;
   int oldHeight=Height;
   MinimumSize=new Size(MinimumSize.Width,Math.Max(Ui.Px(300),Math.Min(MinimumSize.Height+delta,work.Height)));

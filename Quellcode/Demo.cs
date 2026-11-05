@@ -11,6 +11,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Fensterpositionen {
@@ -43,7 +44,7 @@ static class Demo {
      Shot(backdrop,()=>new MainForm(),null,Path.Combine(outDir,suffix+".png"));
      Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoRun(),Path.Combine(outDir,"ablauf-"+suffix+".png"));
      Shot(backdrop,()=>new AddProgramForm(icon,new Entry[0]),null,Path.Combine(outDir,"hinzufuegen-"+suffix+".png"));
-     Shot(backdrop,()=>new AboutForm(MainForm.LoadSignature(),icon,null),null,Path.Combine(outDir,"info-"+suffix+".png"));
+     Shot(backdrop,()=>new AboutForm(MainForm.LoadSignature(),icon,null,DemoUpdates()),null,Path.Combine(outDir,"info-"+suffix+".png"));
     }
    }
    return true;
@@ -53,6 +54,11 @@ static class Demo {
   }
  }
 
+ // Screenshots: keine Prüfung, das Info-Fenster zeigt "Aktuell – zuletzt geprüft <heute>".
+ static UpdateHooks DemoUpdates() {
+  var status=new UpdateStatus{State=UpdateState.Current,Text="Aktuell",Detail="Zuletzt geprüft "+DateTime.Now.ToString("dd.MM.yyyy")};
+  return new UpdateHooks{Status=()=>status,Auto=()=>true,SetAuto=on=>{},CheckNow=()=>Task.FromResult(status),CanInstall=()=>false,Install=()=>{},OpenPage=()=>{}};
+ }
  static void Shot(Backdrop backdrop,Func<Form> create,Action<Form> prepare,string file) {
   using(var f=create()) {
    f.ShowInTaskbar=false;

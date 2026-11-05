@@ -1,6 +1,6 @@
 FENSTERPOSITIONEN
 ================
-Version 2.38 (Build-Datum wird angehängt, z.B. 2.38.2026.1103)
+Version 2.43 (Build-Datum wird angehängt, z.B. 2.43.2026.1106)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -108,6 +108,7 @@ Quellcode         Fensterpositionen.cs   Programmstart, Name, EXE-Angaben
                   Ausrichten.cs          Fenster messen, ausrichten, verschieben
                   Speicher.cs            Positionen, Sicherungen, Protokoll, Selbsttest
                   Demo.cs                Screenshots für GitHub (--screenshots)
+                  Update.cs              Update-Prüfung über GitHub, Selbst-Update
                   VersionInfo.cs         von Erstellen.bat erzeugt
 Resources         Fensterpositionen.ico, GS-Logo.png, Startwerte.json
                   (wird vom Programm gebraucht oder eingebettet)
@@ -379,7 +380,36 @@ Unten steht wie beim Monitor Dimmer links "© Jahr · Fensterpositionen",
 rechts das GS-Logo mit "Günther Schoder" und "www.westmc002.de"; ein Klick
 darauf öffnet die Website. Ein Klick auf die Versions-Plakette oben
 öffnet das Info-Fenster (Version, Erstellungsdatum, Farbschema, Speicherort,
-Anleitung, Sicherungen, Protokolle). Das Logo GS-Logo.png wird beim Erstellen in die EXE
+Updates, Anleitung, Sicherungen, Protokolle).
+
+Updates
+-------
+Fensterpositionen fragt die neueste Version auf GitHub ab
+(github.com/WestMc002/Fensterpositionen-wiederherstellen, Releases).
+Dabei wird nur die öffentliche Release-Liste gelesen; es werden keine
+Daten übertragen und keine Anmeldung gebraucht.
+- Beim Start wird still geprüft, höchstens einmal täglich. Abschaltbar im
+  Info-Fenster mit dem Schalter "Automatisch prüfen".
+- Im Info-Fenster zeigt die Zeile "Updates" den Stand mit Symbol (Aktuell,
+  Version x verfügbar, Prüfung nicht möglich, Noch nicht geprüft) und
+  darunter das Datum der letzten Prüfung. Der Knopf rechts heißt
+  "Jetzt prüfen", bei einer neuen Version "Aktualisieren" (schließt das
+  Info-Fenster und startet das Update) bzw. im Projektordner
+  "Release-Seite". Das Ergebnis einer Prüfung von Hand steht nur dort; im
+  Hauptfenster erscheint nur bei einer neuen Version der Hinweis.
+- Gibt es eine neuere Version, erscheint oben im Hauptfenster ein Hinweis:
+  "Jetzt aktualisieren" lädt das ZIP, beendet Fensterpositionen, ersetzt EXE
+  und Anleitung und startet das Programm neu. Gespeicherte Positionen und
+  Einstellungen (%LOCALAPPDATA%) bleiben erhalten; das Ergebnis steht danach
+  im Protokoll. Schlägt das Ersetzen fehl, bleibt die bisherige Version.
+  "Release-Seite" öffnet die Seite im Browser, "Später" blendet den Hinweis
+  bis zur nächsten Prüfung aus.
+- Liegt der Programmordner unter "Programme" o. ä. ohne Schreibrechte,
+  fragt Windows beim Aktualisieren nach Administratorrechten.
+- Im Projektordner (mit Erstellen.bat) wird nie ersetzt, weil dort die EXE
+  beim Erstellen entsteht; "Jetzt aktualisieren" öffnet dann die Release-Seite.
+- Download und Hilfsskript liegen im Temp-Ordner unter
+  "Fensterpositionen wiederherstellen-Update". Das Logo GS-Logo.png wird beim Erstellen in die EXE
 eingebettet. Dateieigenschaften der EXE: Copyright "© 2026 Günther Schoder",
 kein Firmenname.
 
@@ -416,6 +446,10 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.39 bis 2.43  Update-Prüfung über GitHub: beim Start (höchstens täglich) und
+               im Info-Fenster (Stand mit Symbol, "Jetzt prüfen", Schalter
+               "Automatisch prüfen"); Hinweis mit "Jetzt aktualisieren" und
+               "Release-Seite". Versions-Plakette im Kopf vereinheitlicht.
 2.37 bis 2.38  Hinweistext und Tooltips erklären "Positionen speichern" und
                "Wiederherstellen" zusammen mit "Kanten je Programm".
 2.34 bis 2.36  Weitere Easy2Sync-Fenster immer waagerecht mittig über dem

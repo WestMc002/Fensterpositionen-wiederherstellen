@@ -21,7 +21,7 @@ using System.Drawing.Drawing2D;
 
 namespace Fensterpositionen {
 public class AboutForm:FixedSizeForm {
- public AboutForm(Bitmap logo,Icon icon,EventHandler openBackups) {
+ public AboutForm(Bitmap logo,Icon icon,EventHandler openBackups,UpdateHooks updates) {
   Text="Info über "+AppInfo.Product;
   // Normaler Rahmen wie die Hauptfenster (Icon mit gleichem Abstand), Größe fest: siehe FixedSizeForm.
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
@@ -41,12 +41,13 @@ public class AboutForm:FixedSizeForm {
   string local=Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
   if(root.StartsWith(local,StringComparison.OrdinalIgnoreCase))root="%LOCALAPPDATA%"+root.Substring(local.Length);
   var lines=new[]{new[]{"Entwickler","Günther Schoder"},new[]{"Erstellt",built},new[]{"Farbschema",(Ui.Dark?"dunkel":"hell")+" (folgt Windows)"},new[]{"Positionen",root}};
-  int lineH=Ui.Px(26),cardH=lines.Length*lineH+Ui.Px(24);
+  int lineH=Ui.Px(26),updateH=updates!=null?Ui.Px(60)+Ui.Px(32):0,cardH=lines.Length*lineH+Ui.Px(24)+updateH;
   var card=new Card{Bounds=new Rectangle(pad,y,w-2*pad,cardH),Padding=new Padding(0)};
   for(int i=0;i<lines.Length;i++) {
    card.Controls.Add(new Label{Text=lines[i][0],Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,AutoEllipsis=true,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),Ui.Px(12)+i*lineH,Ui.Px(96),lineH)});
    card.Controls.Add(new Label{Text=lines[i][1],Font=Ui.SmallFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(112),Ui.Px(12)+i*lineH,card.Width-Ui.Px(124),lineH)});
   }
+  if(updates!=null)AddUpdateRows(card,Ui.Px(12)+lines.Length*lineH,updates);
   Controls.Add(card);
   y+=cardH+Ui.Px(18);
   string guide=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Anleitung.txt");
@@ -72,6 +73,88 @@ public class AboutForm:FixedSizeForm {
   y+=Ui.Px(22)+Ui.Px(18);
   ClientSize=new Size(w,y);
  }
+ // Updates (Globale Richtlinien): Zeile "Updates" 60 hoch mit Symbol, Stand, "Zuletzt geprüft …" und Knopf,
+ // darunter 32 hoch "Automatisch prüfen" mit Schalter.
+ static Font detailFont,smallGlyphFont;
+ GlyphView statusGlyph;Label statusText,statusDetail;ModernButton statusButton;
+ UpdateHooks hooks;Card updateCard;
+ enum ButtonMode {Check,Install,Page}
+ ButtonMode mode;
+ void AddUpdateRows(Card card,int top,UpdateHooks updates) {
+  hooks=updates;updateCard=card;
+  if(detailFont==null)detailFont=new Font("Segoe UI",8.75f);
+  if(smallGlyphFont==null&&Ui.IconFont!=null)smallGlyphFont=new Font(Ui.IconFont.FontFamily,10f);
+  int y1=top+Ui.Px(9),y2=top+Ui.Px(33),lineH=Ui.Px(22);
+  card.Controls.Add(new Label{Text="Updates",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),y1,Ui.Px(96),lineH)});
+  statusGlyph=new GlyphView{BackColor=Ui.Surface,Bounds=new Rectangle(Ui.Px(110),y1,Ui.Px(20),lineH)};
+  statusButton=new ModernButton("Jetzt prüfen",ButtonKind.Secondary,"\uE72C"){Height=Ui.Px(30),Margin=new Padding(0),GlyphFont=smallGlyphFont};
+  statusText=new Label{Font=Ui.SmallFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft};
+  statusText.Location=new Point(Ui.Px(136),y1);statusText.Height=lineH;
+  statusDetail=new Label{Font=detailFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(136),y2,card.Width-Ui.Px(136)-Ui.Px(16),Ui.Px(20))};
+  statusButton.Click+=async(s,e)=>await StatusButtonClick();
+  card.Controls.Add(statusGlyph);card.Controls.Add(statusText);card.Controls.Add(statusDetail);card.Controls.Add(statusButton);
+  // Knopf vor die volle Breite der zweiten Zeile legen, sonst verdeckt sie seinen unteren Rand.
+  statusButton.BringToFront();
+  // Zweite Zeile: nur "Automatisch prüfen", bündig mit den Werten; Schalter rechtsbündig mit dem Knopf.
+  int top2=top+Ui.Px(60);
+  var toggle=new ToggleSwitch{Checked=updates.Auto(),BackColor=Ui.Surface};
+  toggle.Location=new Point(card.Width-Ui.Px(16)-toggle.Width,top2+(Ui.Px(32)-toggle.Height)/2);
+  toggle.CheckedChanged+=(s,e)=>updates.SetAuto(toggle.Checked);
+  var autoText=new Label{Text="Automatisch prüfen",Font=Ui.SmallFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,Cursor=Cursors.Hand,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(112),top2,toggle.Left-Ui.Px(120),Ui.Px(32))};
+  autoText.Click+=(s,e)=>toggle.Checked=!toggle.Checked;
+  card.Controls.Add(autoText);card.Controls.Add(toggle);
+  ShowStatus(updates.Status());
+ }
+ void ShowStatus(UpdateStatus st) {
+  string glyph;Color color=Ui.Muted,textColor=Ui.TextColor;
+  switch(st.State) {
+   case UpdateState.Current:glyph="\uE930";color=Ui.SuccessColor;break;
+   case UpdateState.Available:glyph="\uE896";color=Ui.Accent;textColor=Ui.Accent;break;
+   case UpdateState.Error:glyph="\uE7BA";color=Ui.ErrorColor;break;
+   case UpdateState.Checking:glyph="\uE895";break;
+   default:glyph="\uE946";break;
+  }
+  statusGlyph.Glyph=glyph;statusGlyph.GlyphColor=color;
+  statusText.Text=st.Text;statusText.ForeColor=textColor;
+  statusDetail.Text=st.Detail??"";
+  if(st.State==UpdateState.Available&&hooks.CanInstall!=null&&hooks.CanInstall()) {
+   mode=ButtonMode.Install;statusButton.Text="Aktualisieren";statusButton.Kind=ButtonKind.Primary;statusButton.Glyph="\uE896";
+  } else if(st.State==UpdateState.Available) {
+   mode=ButtonMode.Page;statusButton.Text="Release-Seite";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="\uE71B";
+  } else {
+   mode=ButtonMode.Check;statusButton.Text="Jetzt prüfen";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="\uE72C";
+  }
+  statusButton.Enabled=st.State!=UpdateState.Checking;
+  // Knopf auf Höhe der ersten Zeile, rechtsbündig; der Stand bekommt den Platz links davon.
+  statusButton.Location=new Point(updateCard.Width-Ui.Px(16)-statusButton.Width,statusText.Top+(statusText.Height-statusButton.Height)/2);
+  statusText.Width=Math.Max(Ui.Px(40),statusButton.Left-Ui.Px(8)-statusText.Left);
+ }
+ async Task StatusButtonClick() {
+  if(mode==ButtonMode.Install){Close();if(hooks.Install!=null)hooks.Install();return;}
+  if(mode==ButtonMode.Page){if(hooks.OpenPage!=null)hooks.OpenPage();return;}
+  ShowStatus(new UpdateStatus{State=UpdateState.Checking,Text="Prüfe auf GitHub …",Detail=statusDetail.Text});
+  UpdateStatus result;
+  try {result=await hooks.CheckNow();}
+  catch(Exception ex){result=new UpdateStatus{State=UpdateState.Error,Text="Prüfung nicht möglich",Detail=ex.Message};}
+  if(!IsDisposed)ShowStatus(result);
+ }
+}
+
+// Stand der Update-Prüfung für das Info-Fenster.
+public enum UpdateState {Unknown,Current,Available,Error,Checking}
+public class UpdateStatus {
+ public UpdateState State;
+ public string Text,Detail;
+}
+// Verbindung des Info-Fensters zur Update-Prüfung im Hauptfenster (Globale Richtlinien, Abschnitt "Updates").
+public class UpdateHooks {
+ public Func<UpdateStatus> Status;
+ public Func<bool> Auto;
+ public Action<bool> SetAuto;
+ public Func<Task<UpdateStatus>> CheckNow;
+ public Func<bool> CanInstall;
+ public Action Install;
+ public Action OpenPage;
 }
 
 // Dialog "Programm hinzufügen": listet geöffnete Fenster; gespeichert wird nur die Fensterposition.

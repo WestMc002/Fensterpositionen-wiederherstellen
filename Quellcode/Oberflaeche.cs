@@ -40,6 +40,8 @@ static class Native {
 public static class Ui {
  public static float S=1f;
  public static int Px(float value){return (int)Math.Round(value*S);}
+ // Hintergrund hinter einem Steuerelement: eine Card zeichnet ihre Fläche selbst (Surface), ihr BackColor ist das Fenster.
+ public static Color ParentFill(Control c){return c.Parent is Card?Surface:c.Parent!=null?c.Parent.BackColor:Bg;}
  public static bool Dark=true;
  public static Color Bg,Surface,Surface2,SurfaceHover,Border,TextColor,Muted,Accent,LogText,InfoText,Tint;
  public static Color SuccessColor,ErrorColor,WarningColor;
@@ -187,8 +189,14 @@ public static class Ui {
 public enum ButtonKind {Primary,Secondary,Ghost}
 public class ModernButton:Button {
  bool hover,down;
- readonly ButtonKind kind;
- readonly string glyph;
+ ButtonKind kind;
+ string glyph;
+ // Symbolschrift für das Symbol (null = Ui.IconFont), z.B. 10 pt bei kleinen Knöpfen.
+ Font glyphFont;
+ public Font GlyphFont{get{return glyphFont;}set{glyphFont=value;Invalidate();}}
+ // Art und Symbol lassen sich nachträglich ändern (z.B. "Jetzt prüfen" → "Aktualisieren").
+ public ButtonKind Kind{get{return kind;}set{kind=value;Font=kind==ButtonKind.Ghost?Ui.UiFont:Ui.UiSemibold;UpdateWidth();Invalidate();}}
+ public string Glyph{get{return glyph;}set{glyph=value;UpdateWidth();Invalidate();}}
  public ModernButton(string text,ButtonKind kind,string glyph) {
   this.kind=kind;this.glyph=glyph;
   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);
@@ -212,7 +220,7 @@ public class ModernButton:Button {
  protected override void OnEnabledChanged(EventArgs e){base.OnEnabledChanged(e);hover=false;down=false;Invalidate();}
  protected override void OnPaint(PaintEventArgs e) {
   var g=e.Graphics;
-  Color parent=Parent!=null?Parent.BackColor:Ui.Bg;
+  Color parent=Ui.ParentFill(this);
   g.Clear(parent);
   g.SmoothingMode=SmoothingMode.AntiAlias;
   Color fill,border,fore;
@@ -242,10 +250,72 @@ public class ModernButton:Button {
   int total=textWidth+(HasGlyph?Ui.Px(26):0);
   int x=(Width-total)/2;
   if(HasGlyph) {
-   TextRenderer.DrawText(g,glyph,Ui.IconFont,new Rectangle(x,0,Ui.Px(18),Height),fore,flags|TextFormatFlags.HorizontalCenter);
+   TextRenderer.DrawText(g,glyph,glyphFont??Ui.IconFont,new Rectangle(x,0,Ui.Px(18),Height),fore,flags|TextFormatFlags.HorizontalCenter);
    x+=Ui.Px(26);
   }
   TextRenderer.DrawText(g,Text,Font,new Rectangle(x,0,textWidth+Ui.Px(4),Height),fore,flags|TextFormatFlags.Left);
+ }
+}
+// Ein-/Aus-Schalter im Windows-11-Stil (40 × 20): an = Akzentfarbe mit weißem Knopf rechts.
+public class ToggleSwitch:Control {
+ bool on,hover;
+ public event EventHandler CheckedChanged;
+ public bool Checked{get{return on;}set{if(on==value)return;on=value;Invalidate();if(CheckedChanged!=null)CheckedChanged(this,EventArgs.Empty);}}
+ public ToggleSwitch() {
+  SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.Selectable,true);
+  Size=new Size(Ui.Px(40),Ui.Px(20));Cursor=Cursors.Hand;TabStop=true;
+ }
+ protected override void OnMouseEnter(EventArgs e){base.OnMouseEnter(e);hover=true;Invalidate();}
+ protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);hover=false;Invalidate();}
+ protected override void OnMouseClick(MouseEventArgs e){base.OnMouseClick(e);if(e.Button==MouseButtons.Left){Focus();Checked=!Checked;}}
+ protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(e.KeyCode==Keys.Space){Checked=!Checked;e.Handled=true;}}
+ protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+ protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+ protected override void OnPaint(PaintEventArgs e) {
+  var g=e.Graphics;
+  Color parent=Ui.ParentFill(this);
+  g.Clear(parent);
+  g.SmoothingMode=SmoothingMode.AntiAlias;
+  var r=new RectangleF(0.5f,0.5f,Width-1.5f,Height-1.5f);
+  using(var path=Ui.Round(Rectangle.Round(r),(int)(r.Height/2))) {
+   if(on) {
+    using(var brush=new SolidBrush(hover?Ui.PrimaryHover:Ui.Primary))g.FillPath(brush,path);
+   } else {
+    using(var brush=new SolidBrush(hover?Ui.Blend(parent,Ui.Tint,0.06f):parent))g.FillPath(brush,path);
+    using(var pen=new Pen(Ui.Muted,Math.Max(1f,Ui.S)))g.DrawPath(pen,path);
+   }
+  }
+  float knob=on?Height*0.6f:Height*0.5f;
+  float cx=on?Width-Height/2f:Height/2f,cy=Height/2f;
+  using(var brush=new SolidBrush(on?Ui.OnPrimary:Ui.Muted))g.FillEllipse(brush,cx-knob/2,cy-knob/2,knob,knob);
+  if(Focused&&ShowFocusCues)using(var pen=new Pen(Ui.Blend(Ui.Accent,Ui.Tint,0.3f))){var f=Rectangle.Inflate(Rectangle.Round(r),-1,-1);using(var p2=Ui.Round(f,f.Height/2))g.DrawPath(pen,p2);}
+ }
+}
+// Einzelnes Symbol der Symbolschrift, nach den tatsächlich gezeichneten Pixeln mittig gesetzt.
+public class GlyphView:Control {
+ string glyph="";Color color;
+ public string Glyph{get{return glyph;}set{glyph=value??"";Invalidate();}}
+ public Color GlyphColor{get{return color;}set{color=value;Invalidate();}}
+ public GlyphView() {
+  SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.SupportsTransparentBackColor,true);
+  color=Ui.TextColor;
+ }
+ protected override void OnPaint(PaintEventArgs e) {
+  var g=e.Graphics;
+  g.Clear(Ui.ParentFill(this));
+  if(Ui.IconFont==null||glyph.Length==0)return;
+  int size=Math.Max(Width,Height)*2;
+  using(var bmp=new Bitmap(size,size))
+  using(var bg=Graphics.FromImage(bmp)) {
+   bg.Clear(Color.Transparent);
+   bg.TextRenderingHint=System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+   using(var brush=new SolidBrush(color))bg.DrawString(glyph,Ui.IconFont,brush,size/4f,size/4f);
+   int left=size,top=size,right=-1,bottom=-1;
+   for(int y=0;y<size;y++)for(int x=0;x<size;x++)if(bmp.GetPixel(x,y).A>24){if(x<left)left=x;if(x>right)right=x;if(y<top)top=y;if(y>bottom)bottom=y;}
+   if(right<0)return;
+   int w=right-left+1,h=bottom-top+1;
+   g.DrawImage(bmp,new Rectangle((Width-w)/2,(Height-h)/2,w,h),new Rectangle(left,top,w,h),GraphicsUnit.Pixel);
+  }
  }
 }
 public class Card:Panel {
@@ -268,6 +338,7 @@ public class HeaderPanel:Panel {
  public string Title="",Subtitle="",Badge="";
  public event EventHandler BadgeClick;
  Rectangle badgeRect;
+ Font badgeFont;float badgeScale;
  readonly ToolTip tip=new ToolTip();
  protected override void OnMouseMove(MouseEventArgs e) {
   base.OnMouseMove(e);
@@ -301,15 +372,18 @@ public class HeaderPanel:Panel {
   TextRenderer.DrawText(g,Title,Ui.TitleFont,new Point(x,y),Ui.TextColor,flags);
   TextRenderer.DrawText(g,Subtitle,Ui.SmallFont,new Point(x+1,y+title.Height+gap),Ui.Muted,flags);
   if(!String.IsNullOrEmpty(Badge)) {
+   // Versions-Plakette (Globale Richtlinien): 12 × Skalierung hinter dem Textende des Namens (gleiche Flags),
+   // Höhe 21, Schrift Segoe UI 10,5 px, Innenabstand je 8, senkrecht mittig zum Namen.
    g.SmoothingMode=SmoothingMode.AntiAlias;
-   Size b=TextRenderer.MeasureText(g,Badge,Ui.SmallFont,Size.Empty,flags);
-   int h=b.Height+Ui.Px(6);
-   var pill=new Rectangle(x+title.Width+Ui.Px(12),y+(title.Height-h)/2+Ui.Px(2),b.Width+Ui.Px(18),h);
+   if(badgeFont==null||badgeScale!=Ui.S){if(badgeFont!=null)badgeFont.Dispose();badgeFont=new Font("Segoe UI",10.5f*Ui.S,GraphicsUnit.Pixel);badgeScale=Ui.S;}
+   Size b=TextRenderer.MeasureText(g,Badge,badgeFont,Size.Empty,flags);
+   int h=Ui.Px(21);
+   var pill=new Rectangle(x+title.Width+Ui.Px(12),y+(title.Height-h)/2,b.Width+2*Ui.Px(8),h);
    badgeRect=pill;
    using(var path=Ui.Round(pill,h/2))
    using(var brush=new SolidBrush(Ui.Blend(Ui.Bg,Ui.Accent,0.14f)))
    using(var pen=new Pen(Ui.Blend(Ui.Bg,Ui.Accent,0.38f))) {g.FillPath(brush,path);g.DrawPath(pen,path);}
-   TextRenderer.DrawText(g,Badge,Ui.SmallFont,pill,Ui.Blend(Ui.Accent,Ui.Tint,0.25f),flags|TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+   TextRenderer.DrawText(g,Badge,badgeFont,pill,Ui.Blend(Ui.Accent,Ui.Tint,0.25f),flags|TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
   }
  }
 }

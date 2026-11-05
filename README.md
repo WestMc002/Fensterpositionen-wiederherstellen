@@ -35,6 +35,7 @@ The interface is in German.
 - **Correction while starting:** saved alignment rules are re-applied while a program loads.
 - Nothing is selected at start – only the checked programs are processed.
 - Restart as administrator with one click (needed for programs running elevated).
+- **Update check** against the GitHub releases (at most once a day at start, or from the About window); a newer version can be installed with one click (“Jetzt aktualisieren”), settings are kept.
 - **Log** in the window and as a daily log file (kept 30 days).
 - Windows 11 design: light/dark mode and accent color follow Windows live.
 
@@ -80,6 +81,7 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 - **Nachkorrektur beim Start:** gespeicherte Ausrichtungen werden während der Ladephase eines Programms erneut angewandt.
 - Beim Start ist nichts angehakt – bearbeitet wird nur, was angehakt ist.
 - Neustart als Administrator per Klick (nötig für Programme, die mit Administratorrechten laufen).
+- **Update-Prüfung** über die GitHub-Releases (beim Start höchstens einmal täglich oder im Info-Fenster); eine neuere Version lässt sich per Klick installieren („Jetzt aktualisieren“), Einstellungen bleiben erhalten.
 - **Protokoll** im Fenster und als Tagesdatei (30 Tage aufbewahrt).
 - Windows-11-Design: Hell/Dunkel und Akzentfarbe folgen Windows sofort.
 

@@ -3,7 +3,7 @@
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Weitere Quelldateien im Ordner Quellcode: Speicher.cs, Ausrichten.cs, Oberflaeche.cs, Dialoge.cs, Hauptfenster.cs, Demo.cs.
+// Weitere Quelldateien im Ordner Quellcode: Speicher.cs, Ausrichten.cs, Oberflaeche.cs, Dialoge.cs, Hauptfenster.cs, Demo.cs, Update.cs.
 
 using System;
 using System.IO;
@@ -44,6 +44,8 @@ static class Program {
    if(!Demo.RunScreenshots(dir))Environment.ExitCode=1;
    return;
   }
+  // Neustart durch das Update-Skript: Ergebnis des Updates ins Protokoll schreiben.
+  if(args.Any(x=>x=="--nach-update"))MainForm.AfterUpdate=true;
   try {Application.Run(new MainForm());}catch(Exception e){MessageBox.Show(e.Message,"Fensterpositionen",MessageBoxButtons.OK,MessageBoxIcon.Error);}
  }
 }
