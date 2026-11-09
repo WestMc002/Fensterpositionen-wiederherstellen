@@ -339,22 +339,6 @@ public class HeaderPanel:Panel {
  public event EventHandler BadgeClick;
  Rectangle badgeRect;
  Font badgeFont;float badgeScale;
- // Sichtbare Ober- und Unterkante der Großbuchstaben im Namen (relativ zum Textrahmen, NoPadding).
- int capTop=-1,capBottom=-1;Font capFont;
- void MeasureCaps(TextFormatFlags flags) {
-  if(capFont==Ui.TitleFont&&capTop>=0)return;
-  capFont=Ui.TitleFont;
-  Size box=TextRenderer.MeasureText("H",Ui.TitleFont,Size.Empty,flags);
-  using(var bmp=new Bitmap(Math.Max(1,box.Width),Math.Max(1,box.Height)))
-  using(var g=Graphics.FromImage(bmp)) {
-   g.Clear(Color.White);
-   TextRenderer.DrawText(g,"H",Ui.TitleFont,new Point(0,0),Color.Black,Color.White,flags);
-   capTop=-1;capBottom=-1;
-   for(int y=0;y<bmp.Height;y++)for(int x=0;x<bmp.Width;x++)
-    if(bmp.GetPixel(x,y).R<128){if(capTop<0)capTop=y;capBottom=y;break;}
-   if(capTop<0){capTop=0;capBottom=box.Height-1;}
-  }
- }
  readonly ToolTip tip=new ToolTip();
  protected override void OnMouseMove(MouseEventArgs e) {
   base.OnMouseMove(e);
@@ -394,11 +378,8 @@ public class HeaderPanel:Panel {
    if(badgeFont==null||badgeScale!=Ui.S){if(badgeFont!=null)badgeFont.Dispose();badgeFont=new Font("Segoe UI",10.5f*Ui.S,GraphicsUnit.Pixel);badgeScale=Ui.S;}
    Size b=TextRenderer.MeasureText(g,Badge,badgeFont,Size.Empty,flags);
    int h=Ui.Px(21);
-   // Senkrecht mittig zu den sichtbaren Großbuchstaben des Namens: Der Textrahmen enthält auch die
-   // Unterlänge (z.B. "p"), mittig dazu wirkte die Plakette 2–3 px zu hoch.
-   MeasureCaps(flags);
-   int capMiddle=y+(capTop+capBottom+1)/2;
-   var pill=new Rectangle(x+title.Width+Ui.Px(12),capMiddle-h/2,b.Width+2*Ui.Px(8),h);
+   // Senkrecht mittig zum Namen (Textrahmen mit NoPadding gemessen), ohne zusätzlichen Versatz.
+   var pill=new Rectangle(x+title.Width+Ui.Px(12),y+(title.Height-h)/2,b.Width+2*Ui.Px(8),h);
    badgeRect=pill;
    using(var path=Ui.Round(pill,h/2))
    using(var brush=new SolidBrush(Ui.Blend(Ui.Bg,Ui.Accent,0.14f)))
@@ -897,7 +878,8 @@ public class FixedSizeForm:Form {
  }
  protected override void OnLoad(EventArgs e) {
   base.OnLoad(e);
-  MinimumSize=Size;MaximumSize=Size;
+  // Als Seite im Hauptfenster eingebettet (TopLevel=false) passt sich die Größe dem Inhaltsbereich an.
+  if(TopLevel){MinimumSize=Size;MaximumSize=Size;}
  }
  protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.DarkTitle(Handle);}
  const int WM_NCHITTEST=0x0084,HTCLIENT=1,HTLEFT=10,HTBOTTOMRIGHT=17;
@@ -906,6 +888,64 @@ public class FixedSizeForm:Form {
   if(m.Msg==WM_NCHITTEST) {
    int hit=m.Result.ToInt32();
    if(hit>=HTLEFT&&hit<=HTBOTTOMRIGHT)m.Result=(IntPtr)HTCLIENT;
+  }
+ }
+}
+// Eintrag der Navigation links (Globale Richtlinien, Navigation; Vorlage: Wake on LAN, NavButton):
+// 40 hoch, Symbol 14 pt (Stecknadel 12 pt), ausgewählt grau hinterlegt mit Akzentbalken links.
+public class NavButton:Button {
+ bool hover,down,selected;
+ char glyph;
+ public bool IconOnly;
+ public char Glyph{get{return glyph;}set{glyph=value;Invalidate();}}
+ public static Color SelectedFill{get{return Ui.Dark?Color.FromArgb(45,45,45):Color.FromArgb(234,234,234);}}
+ public static Color HoverFill{get{return Ui.Dark?Color.FromArgb(52,52,52):Color.FromArgb(246,246,246);}}
+ public static Color DownFill{get{return Ui.Dark?Color.FromArgb(62,62,62):Color.FromArgb(236,236,236);}}
+ public NavButton(string text,char glyph) {
+  this.glyph=glyph;
+  SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.UserPaint|ControlStyles.ResizeRedraw,true);
+  FlatStyle=FlatStyle.Flat;FlatAppearance.BorderSize=0;
+  Font=new Font("Segoe UI",9.5f);
+  Cursor=Cursors.Hand;
+  Height=Ui.Px(40);
+  Text=text;
+  if(text.Length>0)AccessibleName=text;
+ }
+ public bool Selected{get{return selected;}set{if(selected!=value){selected=value;Invalidate();}}}
+ protected override bool ShowFocusCues{get{return false;}}
+ protected override void OnMouseEnter(EventArgs e){hover=true;Invalidate();base.OnMouseEnter(e);}
+ protected override void OnMouseLeave(EventArgs e){hover=false;down=false;Invalidate();base.OnMouseLeave(e);}
+ protected override void OnMouseDown(MouseEventArgs e){if(e.Button==MouseButtons.Left){down=true;Invalidate();}base.OnMouseDown(e);}
+ protected override void OnMouseUp(MouseEventArgs e){down=false;Invalidate();base.OnMouseUp(e);}
+ protected override void OnEnabledChanged(EventArgs e){Invalidate();base.OnEnabledChanged(e);}
+ protected override void OnTextChanged(EventArgs e){base.OnTextChanged(e);Invalidate();}
+ protected override void OnPaint(PaintEventArgs e) {
+  var g=e.Graphics;
+  Color back=Parent!=null?Parent.BackColor:Ui.Bg;
+  g.Clear(back);
+  g.SmoothingMode=SmoothingMode.AntiAlias;
+  Color fill=selected&&!IconOnly?SelectedFill:down&&Enabled?DownFill:hover&&Enabled?HoverFill:back;
+  Color text=Enabled?Ui.TextColor:Ui.Blend(Ui.Muted,back,0.4f);
+  if(fill!=back)
+   using(var path=Ui.Round(new Rectangle(0,0,Width-1,Height-1),Ui.Px(5)))
+   using(var brush=new SolidBrush(fill)) g.FillPath(brush,path);
+  // Symbolgrößen wie Wake on LAN: Einträge und ☰ 14 pt, Stecknadel 12 pt.
+  int gs=(int)Math.Round((IconOnly?12f:14f)*96f/72f*Ui.S);
+  if(IconOnly){DrawGlyph(g,(Width-gs)/2,gs,text);return;}
+  if(selected)
+   using(var path=Ui.Round(new Rectangle(0,Height/2-Ui.Px(8),Ui.Px(3),Ui.Px(16)),Math.Max(1,Ui.Px(1))))
+   using(var brush=new SolidBrush(Ui.Primary)) g.FillPath(brush,path);
+  int x=Ui.Px(14);
+  if(glyph!='\0'){DrawGlyph(g,x+(Ui.Px(20)-gs)/2,gs,text);x+=Ui.Px(32);}
+  // Eingeklappt: nur das Symbol.
+  if(Text.Length>0&&Width-x-Ui.Px(8)>Ui.Px(20))
+   using(var bold=selected?new Font("Segoe UI Semibold",9.5f):null)
+    TextRenderer.DrawText(g,Text,bold??Font,new Rectangle(x,0,Width-x-Ui.Px(8),Height),text,
+     TextFormatFlags.VerticalCenter|TextFormatFlags.Left|TextFormatFlags.NoPadding|TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.EndEllipsis);
+ }
+ void DrawGlyph(Graphics g,int x,int size,Color color) {
+  using(var image=MenuStyle.Glyph(glyph,color,size,size)) {
+   if(image!=null)g.DrawImage(image,x,(Height-size)/2,size,size);
   }
  }
 }

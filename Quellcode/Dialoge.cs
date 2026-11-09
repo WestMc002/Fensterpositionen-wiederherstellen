@@ -157,7 +157,8 @@ public class UpdateHooks {
  public Action OpenPage;
 }
 
-// Dialog "Programm hinzufügen": listet geöffnete Fenster; gespeichert wird nur die Fensterposition.
+// Seite "Programm hinzufügen" (im Hauptfenster eingebettet, Überschrift kommt von dort):
+// listet geöffnete Fenster; gespeichert wird nur die Fensterposition.
 public class AddProgramForm:FixedSizeForm {
  class WindowChoice {
   public string Title,Process,Exe,Description;
@@ -179,10 +180,9 @@ public class AddProgramForm:FixedSizeForm {
   Text="Programm hinzufügen";
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
-  int w=Ui.Px(560),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
-  Controls.Add(new Label{Text="Programm hinzufügen",Font=Ui.HeadingFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,Bounds=new Rectangle(pad,y,inner,Ui.Px(32))});
-  y+=Ui.Px(34);
-  Controls.Add(new Label{Text="Wähle ein geöffnetes Fenster. Gespeichert wird nur seine Position und Größe – das Programm wird dafür nicht beendet.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(40))});
+  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(4),inner=w-2*pad;
+  var intro=new Label{Text="Wähle ein geöffnetes Fenster. Gespeichert wird nur seine Position und Größe – das Programm wird dafür nicht beendet.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
+  Controls.Add(intro);
   y+=Ui.Px(46);
   var listCard=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(268)),Padding=new Padding(Ui.Px(4))};
   windows.Dock=DockStyle.Fill;windows.BorderStyle=BorderStyle.None;windows.IntegralHeight=false;
@@ -199,7 +199,8 @@ public class AddProgramForm:FixedSizeForm {
   listCard.Controls.Add(windows);
   Controls.Add(listCard);
   y+=listCard.Height+Ui.Px(14);
-  Controls.Add(new Label{Text="Name in der Liste",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(22))});
+  var nameLabel=new Label{Text="Name in der Liste",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(22))};
+  Controls.Add(nameLabel);
   y+=Ui.Px(24);
   var nameCard=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(36)),Padding=new Padding(Ui.Px(10),Ui.Px(8),Ui.Px(10),0)};
   nameBox.Dock=DockStyle.Fill;nameBox.BorderStyle=BorderStyle.None;nameBox.BackColor=Ui.Surface;nameBox.ForeColor=Ui.TextColor;nameBox.Font=Ui.UiFont;
@@ -214,13 +215,21 @@ public class AddProgramForm:FixedSizeForm {
   addButton=new ModernButton("Hinzufügen",ButtonKind.Primary,null);
   var cancel=new ModernButton("Abbrechen",ButtonKind.Secondary,null);
   cancel.DialogResult=DialogResult.Cancel;
-  cancel.Location=new Point(w-pad-cancel.Width,y);
-  addButton.Location=new Point(cancel.Left-Ui.Px(8)-addButton.Width,y);
+  // Wie bei den Einstellungsseiten: "Abbrechen" links, Primärknopf ganz rechts, 10 Abstand.
+  addButton.Location=new Point(w-pad-addButton.Width,y);
+  cancel.Location=new Point(addButton.Left-Ui.Px(10)-cancel.Width,y);
   addButton.Click+=(s,e)=>Accept();
-  Controls.Add(addButton);Controls.Add(cancel);
+  Controls.Add(cancel);Controls.Add(addButton);
   CancelButton=cancel;
   y+=Ui.Px(38)+Ui.Px(20);
   ClientSize=new Size(w,y);
+  // Im Hauptfenster füllt die Seite den Inhaltsbereich: Liste wächst mit, Name und Knöpfe bleiben unten.
+  // (Anker erst nach der endgültigen Startgröße setzen, sonst stimmen die Abstände nicht.)
+  intro.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;
+  listCard.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;
+  nameLabel.Anchor=nameCard.Anchor=AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;
+  refresh.Anchor=AnchorStyles.Bottom|AnchorStyles.Left;
+  addButton.Anchor=cancel.Anchor=AnchorStyles.Bottom|AnchorStyles.Right;
   LoadWindows();
  }
  void UpdateButtons(){addButton.Enabled=windows.SelectedItem!=null&&nameBox.Text.Trim().Length>0;}
@@ -304,7 +313,7 @@ public class AddProgramForm:FixedSizeForm {
  }
 }
 
-// Dialog "Einmalig ausrichten": ein beliebiges offenes Fenster anklicken und ausrichten,
+// Seite "Einmalig ausrichten" (im Hauptfenster eingebettet): ein beliebiges offenes Fenster anklicken und ausrichten,
 // ohne es in die Liste aufzunehmen. Es wird nichts gespeichert (keine Regel, keine Nachkorrektur).
 public class OneTimeAlignForm:FixedSizeForm {
  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
@@ -331,12 +340,10 @@ public class OneTimeAlignForm:FixedSizeForm {
   Text="Einmalig ausrichten";
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
-  // Bleibt sichtbar, während das Zielfenster angeklickt wird.
-  TopMost=true;KeyPreview=true;
-  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
-  Controls.Add(new Label{Text="Einmalig ausrichten",Font=Ui.HeadingFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,Bounds=new Rectangle(pad,y,inner,Ui.Px(32))});
-  y+=Ui.Px(34);
-  Controls.Add(new Label{Text="Ein beliebiges offenes Fenster anklicken und ausrichten. Es wird nicht in die Liste aufgenommen und nichts gespeichert.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(40))});
+  KeyPreview=true;
+  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(4),inner=w-2*pad;
+  var intro=new Label{Text="Ein beliebiges offenes Fenster anklicken und ausrichten. Es wird nicht in die Liste aufgenommen und nichts gespeichert.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
+  Controls.Add(intro);
   y+=Ui.Px(48);
   var card=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(64))};
   pick=new ModernButton("Fenster anklicken",ButtonKind.Primary,"\uE7C9");
@@ -363,19 +370,19 @@ public class OneTimeAlignForm:FixedSizeForm {
   y+=Ui.Px(38)+Ui.Px(12);
   status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
   Controls.Add(status);
-  y+=status.Height+Ui.Px(8);
-  var close=new ModernButton("Schließen",ButtonKind.Secondary,null);
-  close.DialogResult=DialogResult.Cancel;
-  close.Location=new Point(w-pad-close.Width,y);
-  Controls.Add(close);
-  y+=Ui.Px(38)+Ui.Px(20);
+  // Kein Knopf "Schließen": zurück geht es über die Navigation (oder Esc).
+  y+=status.Height+Ui.Px(20);
   ClientSize=new Size(w,y);
+  // Im Hauptfenster nutzt die Seite die volle Breite (Anker erst nach der Startgröße setzen).
+  intro.Anchor=card.Anchor=status.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;
+  pick.Anchor=AnchorStyles.Top|AnchorStyles.Right;
+  windowTitle.Anchor=windowDetail.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;
   timer.Tick+=(s,e)=>CheckForeground();
   FormClosed+=(s,e)=>{timer.Stop();timer.Dispose();};
   UpdateButtons();
-  // Gleich nach dem Öffnen auf den Klick warten: meist ist genau das gewünscht.
-  Shown+=(s,e)=>StartPick();
  }
+ // Vom Hauptfenster nach dem Anzeigen aufgerufen: gleich auf den Klick warten, meist ist genau das gewünscht.
+ public void Begin(){StartPick();}
  protected override void OnKeyDown(KeyEventArgs e) {
   base.OnKeyDown(e);
   if(e.KeyCode!=Keys.Escape)return;
@@ -418,6 +425,9 @@ public class OneTimeAlignForm:FixedSizeForm {
   windowDetail.Text=processName.Length>0?processName:"Prozess nicht lesbar";
   StopPick();
   status.Text="Fenster gewählt – jetzt die Richtung anklicken. Mehrere Richtungen nacheinander ergänzen sich.";
+  // Das angeklickte Fenster liegt jetzt vorn: Programmfenster wieder nach vorn holen, damit die Richtungen erreichbar sind.
+  var top=TopLevelControl as Form;
+  if(top!=null)top.Activate();
  }
  async Task Apply(string mode,string name) {
   if(target==IntPtr.Zero||working||picking)return;
@@ -439,7 +449,8 @@ public class OneTimeAlignForm:FixedSizeForm {
  }
 }
 
-// Dialog "Kanten je Programm": je Programm die Kanten festlegen, an denen ausgerichtet wird.
+// Einstellungsseite "Kanten je Programm" (im Hauptfenster eingebettet): je Programm die Kanten festlegen,
+// an denen ausgerichtet wird. Übernommen wird erst mit "Speichern"; "Abbrechen" oder ein Wechsel über die Navigation verwirft.
 public class AlignRulesForm:FixedSizeForm {
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd,int msg,IntPtr wParam,string lParam);
  static readonly string[] Directions={"top","bottom","left","right","hcenter","vcenter"};
@@ -453,10 +464,21 @@ public class AlignRulesForm:FixedSizeForm {
  readonly Dictionary<string,string[]> refs=new Dictionary<string,string[]>(StringComparer.OrdinalIgnoreCase);
  readonly Dictionary<string,Label[]> refLabels=new Dictionary<string,Label[]>(StringComparer.OrdinalIgnoreCase);
  readonly ContextMenuStrip refMenu=new ContextMenuStrip();
- readonly Label status;
+ readonly Label status,error;
+ // Speichern (Globale Richtlinien, Einstellungsseiten): liefert eine Fehlermeldung oder null; bei Fehler bleibt der Dialog offen.
+ public Func<string> Save;
  public Dictionary<string,HashSet<string>> Rules;
  public Dictionary<string,Dictionary<string,int>> Gaps;
  public Dictionary<string,Dictionary<string,string>> Refs;
+ // Seitenaufbau: Spalten und Knöpfe passen sich an die Breite an (Arrange), die Tabelle an die Höhe.
+ readonly Label description;
+ readonly Card card;
+ readonly Panel rows,header;
+ readonly ModernButton standard,ok,cancel;
+ readonly List<Action> placers=new List<Action>();
+ readonly int head,rowH;
+ int[] colW=new int[6],colLeft=new int[6];
+ int colX,measureW;
  public AlignRulesForm(Icon icon,IEnumerable<Entry> list,Dictionary<string,HashSet<string>> current,Dictionary<string,Dictionary<string,int>> currentGaps,Dictionary<string,Dictionary<string,string>> currentRefs,int globalGap) {
   programs=new List<Entry>(list);
   Refs=new Dictionary<string,Dictionary<string,string>>(StringComparer.OrdinalIgnoreCase);
@@ -466,48 +488,54 @@ public class AlignRulesForm:FixedSizeForm {
   Text="Kanten je Programm";
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
-  int w=Ui.Px(944),pad=Ui.Px(24),y=Ui.Px(18),inner=w-2*pad;
-  Controls.Add(new Label{Text="Kanten je Programm",Font=Ui.HeadingFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,Bounds=new Rectangle(pad,y,inner,Ui.Px(32))});
-  y+=Ui.Px(34);
-  Controls.Add(new Label{Text="Angehakte Kanten werden ausgerichtet, nicht angehakte bleiben, wie sie sind. Neben dem Haken steht der Abstand in px: leer = allgemeiner Abstand ("+globalGap+" px), sonst gilt die Zahl nur für dieses Programm. Darunter steht, wovon der Abstand gilt: vom Bildschirmrand oder von einem Nachbarprogramm (anklicken zum Ändern). „Messen“ übernimmt die aktuellen Abstände des offenen Fensters für die angehakten Kanten.\r\n„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite). Eigene Programme haben keine Vorgabe.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(112))});
-  y+=Ui.Px(118);
-  int head=Ui.Px(36),rowH=Ui.Px(64),edgeW=Ui.Px(124),midW=Ui.Px(70),measureW=Ui.Px(96);
-  int[] colW={edgeW,edgeW,edgeW,edgeW,midW,midW};
-  // Höchstens 8 Zeilen, auf kleinen Bildschirmen weniger (darüber wird gescrollt).
-  int fitRows=(Screen.PrimaryScreen.WorkingArea.Height-y-Ui.Px(200))/rowH;
-  int visibleRows=Math.Max(1,Math.Min(programs.Count,Math.Min(8,fitRows)));
-  var card=new Card{Bounds=new Rectangle(pad,y,inner,head+visibleRows*rowH+Ui.Px(10)),Padding=new Padding(Ui.Px(1))};
-  int colX=inner-Ui.Px(12)-colW.Sum()-measureW;
-  int[] colLeft=new int[colW.Length];
-  for(int i=0,x=colX;i<colW.Length;x+=colW[i],i++)colLeft[i]=x;
-  var header=new Panel{Dock=DockStyle.Top,Height=head,BackColor=Ui.Surface};
-  header.Controls.Add(new Label{Text="Programm",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),0,colX-Ui.Px(16),head)});
-  for(int i=0;i<Titles.Length;i++)
-   header.Controls.Add(new Label{Text=Titles[i],Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=i<EdgeCount?ContentAlignment.MiddleLeft:ContentAlignment.MiddleCenter,Bounds=i<EdgeCount?new Rectangle(colLeft[i]+Ui.Px(8),0,colW[i]-Ui.Px(8),head):new Rectangle(colLeft[i],0,colW[i],head)});
-  var rows=new Panel{Dock=DockStyle.Fill,AutoScroll=true,BackColor=Ui.Surface};
+  int w=Ui.Px(944),pad=Ui.Px(24),inner=w-2*pad;
+  head=Ui.Px(36);rowH=Ui.Px(64);
+  description=new Label{Text="Angehakte Kanten werden ausgerichtet, nicht angehakte bleiben, wie sie sind. Neben dem Haken steht der Abstand in px: leer = allgemeiner Abstand ("+globalGap+" px), sonst gilt die Zahl nur für dieses Programm. Darunter steht, wovon der Abstand gilt: vom Bildschirmrand oder von einem Nachbarprogramm (anklicken zum Ändern). „Messen“ übernimmt die aktuellen Abstände des offenen Fensters für die angehakten Kanten.\r\n„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite). Eigene Programme haben keine Vorgabe.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
+  Controls.Add(description);
+  // Höchstens 8 Zeilen, auf kleinen Bildschirmen weniger (darüber wird in der Tabelle gescrollt).
+  int fitRows=(Screen.PrimaryScreen.WorkingArea.Height-Ui.Px(540))/rowH;
+  int visibleRows=Math.Max(3,Math.Min(programs.Count,Math.Min(8,fitRows)));
+  card=new Card{Bounds=new Rectangle(pad,0,inner,head+visibleRows*rowH+Ui.Px(10)),Padding=new Padding(Ui.Px(1))};
+  header=new Panel{Dock=DockStyle.Top,Height=head,BackColor=Ui.Surface};
+  var programHead=new Label{Text="Programm",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleLeft};
+  header.Controls.Add(programHead);
+  placers.Add(()=>programHead.Bounds=new Rectangle(Ui.Px(16),0,colX-Ui.Px(16),head));
+  for(int i=0;i<Titles.Length;i++) {
+   int index=i;
+   var title=new Label{Text=Titles[i],Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=i<EdgeCount?ContentAlignment.MiddleLeft:ContentAlignment.MiddleCenter};
+   header.Controls.Add(title);
+   placers.Add(()=>title.Bounds=index<EdgeCount?new Rectangle(colLeft[index]+Ui.Px(8),0,colW[index]-Ui.Px(8),head):new Rectangle(colLeft[index],0,colW[index],head));
+  }
+  rows=new Panel{Dock=DockStyle.Fill,AutoScroll=true,BackColor=Ui.Surface};
   rows.HandleCreated+=(s,e)=>Native.DarkScroll(rows);
   for(int r=0;r<programs.Count;r++) {
    var entry=programs[r];
    int top=r*rowH;
-   rows.Controls.Add(new Label{Text=entry.Name+(entry.Custom?"  (Eigenes)":""),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),top+Ui.Px(6),colX-Ui.Px(20),Ui.Px(32))});
+   int lineTop=top+Ui.Px(6),lineH=Ui.Px(32);
+   var name=new Label{Text=entry.Name+(entry.Custom?"  (Eigenes)":""),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft};
+   rows.Controls.Add(name);
+   placers.Add(()=>name.Bounds=new Rectangle(Ui.Px(16),lineTop,colX-Ui.Px(20),lineH));
    var row=new CheckCell[Directions.Length];
    var fields=new TextBox[EdgeCount];
    var labels=new Label[EdgeCount];
    var chosen=new string[EdgeCount];
    Dictionary<string,string> entryRefs;
    if(!currentRefs.TryGetValue(entry.Id,out entryRefs))entryRefs=new Dictionary<string,string>();
-   int lineTop=top+Ui.Px(6),lineH=Ui.Px(32);
    HashSet<string> allowed;
    if(!current.TryGetValue(entry.Id,out allowed))allowed=MainForm.DefaultEdgesFor(entry.Id);
    Dictionary<string,int> gaps;
    if(!currentGaps.TryGetValue(entry.Id,out gaps))gaps=new Dictionary<string,int>();
    for(int i=0;i<Directions.Length;i++) {
     bool edge=i<EdgeCount;
-    row[i]=new CheckCell{Bounds=edge?new Rectangle(colLeft[i],lineTop,Ui.Px(36),lineH):new Rectangle(colLeft[i],lineTop,colW[i],lineH),Checked=allowed.Contains(Directions[i])};
-    rows.Controls.Add(row[i]);
+    int index=i;
+    var cell=new CheckCell{Checked=allowed.Contains(Directions[i])};
+    row[i]=cell;
+    rows.Controls.Add(cell);
+    placers.Add(()=>cell.Bounds=edge?new Rectangle(colLeft[index],lineTop,Ui.Px(36),lineH):new Rectangle(colLeft[index],lineTop,colW[index],lineH));
     if(!edge)continue;
     // Abstandsfeld erscheint nur bei angehakter Kante.
-    var field=new Card{Bounds=new Rectangle(colLeft[i]+Ui.Px(38),lineTop+(lineH-Ui.Px(30))/2,Ui.Px(58),Ui.Px(30)),Padding=new Padding(Ui.Px(6),Ui.Px(6),Ui.Px(6),0)};
+    var field=new Card{Size=new Size(Ui.Px(58),Ui.Px(30)),Padding=new Padding(Ui.Px(6),Ui.Px(6),Ui.Px(6),0)};
+    placers.Add(()=>field.Location=new Point(colLeft[index]+Ui.Px(38),lineTop+(lineH-Ui.Px(30))/2));
     var box=new TextBox{Dock=DockStyle.Fill,BorderStyle=BorderStyle.None,TextAlign=HorizontalAlignment.Center,MaxLength=4,Font=Ui.UiFont,BackColor=Ui.Surface,ForeColor=Ui.TextColor};
     if(gaps.ContainsKey(Directions[i]))box.Text=gaps[Directions[i]].ToString();
     string cue=globalGap.ToString();
@@ -517,18 +545,18 @@ public class AlignRulesForm:FixedSizeForm {
     // Bezug unter dem Feld: "am Rand" oder "an <Programm>"; Klick öffnet die Auswahl.
     string refId;
     if(entryRefs.TryGetValue(Directions[i],out refId)&&programs.Any(x=>String.Equals(x.Id,refId,StringComparison.OrdinalIgnoreCase)&&x.Id!=entry.Id))chosen[i]=refId;
-    var refLabel=new Label{Font=Ui.SmallFont,ForeColor=Ui.Accent,BackColor=Ui.Surface,Tag="accent",AutoEllipsis=true,UseMnemonic=false,Cursor=Cursors.Hand,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(colLeft[i]+Ui.Px(4),lineTop+lineH,colW[i]-Ui.Px(8),Ui.Px(20))};
-    var owner=entry;int index=i;
+    var refLabel=new Label{Font=Ui.SmallFont,ForeColor=Ui.Accent,BackColor=Ui.Surface,Tag="accent",AutoEllipsis=true,UseMnemonic=false,Cursor=Cursors.Hand,TextAlign=ContentAlignment.MiddleLeft};
+    placers.Add(()=>refLabel.Bounds=new Rectangle(colLeft[index]+Ui.Px(4),lineTop+lineH,colW[index]-Ui.Px(8),Ui.Px(20)));
+    var owner=entry;
     refLabel.Click+=(s,e)=>ShowRefMenu(owner,index,(Label)s);
-    field.Visible=refLabel.Visible=row[i].Checked;
-    var cell=row[i];
+    field.Visible=refLabel.Visible=cell.Checked;
     cell.CheckedChanged+=(s,e)=>{field.Visible=cell.Checked;refLabel.Visible=cell.Checked;};
     rows.Controls.Add(field);rows.Controls.Add(refLabel);
     fields[i]=box;labels[i]=refLabel;
    }
    var measure=new ModernButton("Messen",ButtonKind.Ghost,null);
    measure.Height=Ui.Px(32);measure.Margin=new Padding(0);
-   measure.Location=new Point(colX+colW.Sum()+(measureW-measure.Width)/2,lineTop+(lineH-measure.Height)/2);
+   placers.Add(()=>measure.Location=new Point(colX+colW.Sum()+(measureW-measure.Width)/2,lineTop+(lineH-measure.Height)/2));
    var measured=entry;
    measure.Click+=(s,e)=>Measure(measured);
    rows.Controls.Add(measure);
@@ -537,23 +565,62 @@ public class AlignRulesForm:FixedSizeForm {
   }
   card.Controls.Add(rows);card.Controls.Add(header);rows.BringToFront();
   Controls.Add(card);
-  y+=card.Height+Ui.Px(10);
-  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
+  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false};
   Controls.Add(status);
-  y+=status.Height+Ui.Px(6);
-  var standard=new ModernButton("Standard",ButtonKind.Secondary,"");
-  standard.Location=new Point(pad,y);
+  standard=new ModernButton("Standard",ButtonKind.Secondary,"");
   standard.Click+=(s,e)=>ResetToDefaults();
-  var ok=new ModernButton("Speichern",ButtonKind.Primary,null);
-  var cancel=new ModernButton("Abbrechen",ButtonKind.Secondary,null);
+  ok=new ModernButton("Speichern",ButtonKind.Primary,null);
+  cancel=new ModernButton("Abbrechen",ButtonKind.Secondary,null);
   cancel.DialogResult=DialogResult.Cancel;
-  cancel.Location=new Point(w-pad-cancel.Width,y);
-  ok.Location=new Point(cancel.Left-Ui.Px(8)-ok.Width,y);
   ok.Click+=(s,e)=>Accept();
-  Controls.Add(standard);Controls.Add(ok);Controls.Add(cancel);
+  // Rote Fehlerzeile links neben den Knöpfen auf gleicher Höhe.
+  error=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.ErrorColor,BackColor=Ui.Bg,Tag="error",AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleRight};
+  Controls.Add(standard);Controls.Add(error);Controls.Add(cancel);Controls.Add(ok);
   AcceptButton=ok;CancelButton=cancel;
-  y+=Ui.Px(38)+Ui.Px(20);
-  ClientSize=new Size(w,y);
+  // Starthöhe: Beschreibung, Tabelle, Statuszeile und Knöpfe; im Hauptfenster füllt die Seite den Inhaltsbereich.
+  ClientSize=new Size(w,Ui.Px(4)+DescriptionHeight(inner)+Ui.Px(6)+card.Height+Ui.Px(10)+Ui.Px(40)+Ui.Px(6)+Ui.Px(38)+Ui.Px(20));
+  Resize+=(s,e)=>Arrange();
+  Arrange();
+ }
+ int DescriptionHeight(int width) {
+  return TextRenderer.MeasureText(description.Text,description.Font,new Size(width,0),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height+Ui.Px(4);
+ }
+ // Breite und Höhe verteilen: Die Spalten wachsen mit (bis 1,5-fach), der Rest geht an die Programmspalte;
+ // die Tabelle nimmt die Höhe zwischen Beschreibung und Knöpfen ein und scrollt bei Bedarf.
+ void Arrange() {
+  int pad=Ui.Px(24),inner=Math.Max(Ui.Px(400),ClientSize.Width-2*pad);
+  int y=Ui.Px(4);
+  int descriptionHeight=DescriptionHeight(inner);
+  description.Bounds=new Rectangle(pad,y,inner,descriptionHeight);
+  y+=descriptionHeight+Ui.Px(6);
+  int buttonsTop=ClientSize.Height-Ui.Px(20)-Ui.Px(38);
+  int statusTop=buttonsTop-Ui.Px(6)-Ui.Px(40);
+  int cardHeight=Math.Max(head+rowH+Ui.Px(10),statusTop-Ui.Px(10)-y);
+  card.Bounds=new Rectangle(pad,y,inner,cardHeight);
+  status.Bounds=new Rectangle(pad,card.Bottom+Ui.Px(10),inner,Ui.Px(40));
+  buttonsTop=status.Bottom+Ui.Px(6);
+  standard.Location=new Point(pad,buttonsTop);
+  ok.Location=new Point(pad+inner-ok.Width,buttonsTop);
+  // Globale Richtlinien, Einstellungsseiten: "Abbrechen" links, "Speichern" als Primärknopf ganz rechts, 10 Abstand.
+  cancel.Location=new Point(ok.Left-Ui.Px(10)-cancel.Width,buttonsTop);
+  error.Bounds=new Rectangle(standard.Right+Ui.Px(12),buttonsTop,Math.Max(0,cancel.Left-Ui.Px(12)-standard.Right-Ui.Px(12)),ok.Height);
+  // Spalten: Grundbreiten 124 (Kanten), 70 (Mitte), 96 (Messen); Programmspalte mindestens 220.
+  float baseSum=4*124+2*70+96;
+  int available=inner-Ui.Px(14)-Ui.Px(220);
+  float factor=Math.Max(1f,Math.Min(1.5f,available/(baseSum*Ui.S)));
+  for(int i=0;i<colW.Length;i++)colW[i]=(int)Math.Round((i<EdgeCount?124:70)*factor*Ui.S);
+  measureW=(int)Math.Round(96*factor*Ui.S);
+  // Platz für die senkrechte Bildlaufleiste der Tabelle freihalten.
+  int tableWidth=inner-Ui.Px(2)-SystemInformation.VerticalScrollBarWidth;
+  colX=tableWidth-Ui.Px(12)-colW.Sum()-measureW;
+  for(int i=0,x=colX;i<colW.Length;x+=colW[i],i++)colLeft[i]=x;
+  // In einer gescrollten Tabelle gelten Positionen relativ zur Ansicht: erst nach oben, dann zurück.
+  int scroll=-rows.AutoScrollPosition.Y;
+  rows.AutoScrollPosition=new Point(0,0);
+  rows.SuspendLayout();header.SuspendLayout();
+  foreach(var place in placers)place();
+  header.ResumeLayout();rows.ResumeLayout();
+  rows.AutoScrollPosition=new Point(0,scroll);
  }
  Entry NeighborOf(string id){return id==null?null:programs.FirstOrDefault(x=>String.Equals(x.Id,id,StringComparison.OrdinalIgnoreCase));}
  void UpdateRefLabel(string id,int index) {
@@ -617,6 +684,10 @@ public class AlignRulesForm:FixedSizeForm {
   status.Text="Vorgaben wiederhergestellt (erst mit „Speichern“ übernommen).";
  }
  void Accept() {
+  error.Text="";
+  var rules=new Dictionary<string,HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+  var allGaps=new Dictionary<string,Dictionary<string,int>>(StringComparer.OrdinalIgnoreCase);
+  var allRefs=new Dictionary<string,Dictionary<string,string>>(StringComparer.OrdinalIgnoreCase);
   foreach(var entry in programs) {
    var set=new HashSet<string>();
    var gaps=new Dictionary<string,int>();
@@ -624,12 +695,26 @@ public class AlignRulesForm:FixedSizeForm {
    for(int i=0;i<Directions.Length;i++) {
     if(!row[i].Checked)continue;
     set.Add(Directions[i]);
+    if(i>=EdgeCount)continue;
+    string text=fields[i].Text.Trim();
+    if(text.Length==0)continue;
     int value;
-    if(i<EdgeCount&&Int32.TryParse(fields[i].Text.Trim(),out value))gaps[Directions[i]]=Math.Max(0,Math.Min(MainForm.MaxEdgeGap,value));
+    // Erst alles prüfen, dann speichern.
+    if(!Int32.TryParse(text,out value)||value<0||value>MainForm.MaxEdgeGap) {
+     error.Text=entry.Name+", "+Titles[i]+": Abstand 0 bis "+MainForm.MaxEdgeGap+" px";
+     fields[i].Focus();fields[i].SelectAll();
+     return;
+    }
+    gaps[Directions[i]]=value;
    }
    var entryRefs=new Dictionary<string,string>();
    for(int i=0;i<EdgeCount;i++)if(row[i].Checked&&refs[entry.Id][i]!=null)entryRefs[Directions[i]]=refs[entry.Id][i];
-   Rules[entry.Id]=set;Gaps[entry.Id]=gaps;Refs[entry.Id]=entryRefs;
+   rules[entry.Id]=set;allGaps[entry.Id]=gaps;allRefs[entry.Id]=entryRefs;
+  }
+  Rules=rules;Gaps=allGaps;Refs=allRefs;
+  if(Save!=null) {
+   string message=Save();
+   if(message!=null){error.Text=message;return;}
   }
   DialogResult=DialogResult.OK;
   Close();

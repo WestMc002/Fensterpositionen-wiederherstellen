@@ -1,12 +1,29 @@
-FENSTERPOSITIONEN
+﻿FENSTERPOSITIONEN
 ================
-Version 2.44 (Build-Datum wird angehängt, z.B. 2.44.2026.1106)
+Version 2.47 (Build-Datum wird angehängt, z.B. 2.47.2026.1109)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
 Ohne Startwerte (z.B. nur die EXE aus GitHub) beginnt das Programm leer:
 dann zuerst die Fenster anordnen und "Positionen speichern" anklicken.
 Benötigt Windows mit .NET Framework 4.x (in Windows 10 und 11 enthalten).
+
+Navigation
+----------
+Links im Fenster steht die Navigation:
+- Programme: Startseite mit Programmliste, Wiederherstellen, Positionen
+  speichern, Ausrichten und Protokoll.
+- Kanten je Programm: Einstellungsseite für die Kanten (siehe unten).
+- Einmalig ausrichten: beliebiges offenes Fenster anklicken und ausrichten.
+- Einstellungen (unten, Zahnrad): Menü mit "Sicherungen öffnen",
+  "Protokolle öffnen", "Anleitung öffnen", "Ausgeblendete wieder anzeigen"
+  und "Info über Fensterpositionen".
+☰ klappt die Navigation ein (nur Symbole) bzw. aus. Die Stecknadel pinnt
+sie an: angepinnt bleibt sie offen und schiebt den Inhalt (Standard), sonst
+klappt sie über dem Inhalt aus und nach einer Auswahl wieder ein. Die Wahl
+wird in Positionen.json gespeichert (_nav).
+Wechselt man über die Navigation zu einer anderen Seite, gilt das wie
+"Abbrechen": nicht gespeicherte Änderungen werden verworfen.
 
 Wiederherstellen
 Programme auswählen und "Wiederherstellen" anklicken.
@@ -73,8 +90,9 @@ Sicherungen:
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen\Sicherungen
 Protokolldateien (eine Datei pro Tag, ältere als 30 Tage werden gelöscht):
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen\TraceLogs\Protokoll-JJJJ-MM-TT.txt
-"Sicherungen öffnen" öffnet den Ordner Sicherungen; im Info-Fenster
-öffnet "Protokolle" den Ordner TraceLogs.
+"Sicherungen öffnen" (Navigation > Einstellungen) öffnet den Ordner
+Sicherungen, "Protokolle öffnen" den Ordner TraceLogs; beides geht auch im
+Info-Fenster.
 Bis Version 2.12 lag alles unter %LOCALAPPDATA%\WestMc\Fensterpositionen.
 Beim ersten Start von 2.13 werden Positionen.json und Sicherungen von dort
 einmalig in den neuen Ordner kopiert (steht im Protokoll). Der alte Ordner
@@ -103,7 +121,10 @@ Ordner im Projekt
 -----------------
 Quellcode         Fensterpositionen.cs   Programmstart, Name, EXE-Angaben
                   Hauptfenster.cs        Hauptfenster und Abläufe
-                  Dialoge.cs             Info-Fenster, "Programm hinzufügen"
+                  Dialoge.cs             Info-Fenster und die Seiten "Programm
+                                         hinzufügen", "Einmalig ausrichten",
+                                         "Kanten je Programm"
+                  Meldungen.cs           Meldungen und Rückfragen im Programmdesign
                   Oberflaeche.cs         Farben, Schriften, Steuerelemente
                   Ausrichten.cs          Fenster messen, ausrichten, verschieben
                   Speicher.cs            Positionen, Sicherungen, Protokoll, Selbsttest
@@ -117,7 +138,8 @@ Design            nur Entwürfe und Bilder, vom Programm nicht gebraucht:
   Vorschau          frühere Vorschaubilder (werden nicht mehr erzeugt)
 Backup            Sicherung des ganzen Projekts je Version
 Screenshots       Bilder für GitHub (README.md), paarweise hell/dunkel:
-                  hell/dunkel (Hauptfenster), ablauf-, hinzufuegen- und info-;
+                  hell/dunkel (Hauptfenster), ablauf-, kanten-, hinzufuegen-
+                  und info-;
                   erzeugt das Programm auf Nachfrage beim Erstellen
 Im Projektordner selbst liegen nur Erstellen.bat, die EXE, Anleitung.txt,
 README.md, .gitignore und die Ordner (Erstellen.log entsteht beim Erstellen).
@@ -145,8 +167,8 @@ bereits geöffneten Fenster. Sie misst die sichtbare Unterkante über DWM
 und berücksichtigt unsichtbare Windows-Fensterrahmen sowie DPI-Skalierung.
 Ziel: 18 physische Bildschirmpixel Abstand zur Unterkante des Arbeitsbereichs.
 Bei einer Taskleiste unten entspricht das dem Abstand zur Taskleiste.
-Kanten je Programm: Über "Kanten je Programm" (oben in der Kopfzeile der
-Programmliste) oder per Rechtsklick in die Liste lässt sich für jedes
+Kanten je Programm: Über "Kanten je Programm" (Navigation links, oben in der
+Kopfzeile der Programmliste oder per Rechtsklick in die Liste) lässt sich für jedes
 Programm, auch für eigene, festlegen, an welchen Kanten es ausgerichtet wird:
 Oben, Unten, Links, Rechts, ↔ Mitte (waagerecht) und ↕ Mitte (senkrecht).
 - "Automatisch" richtet alle angehakten Kanten zusammen aus.
@@ -195,15 +217,21 @@ Vorgabe ("Standard", wie bis Version 2.23):
   Easy2Sync      ↔ Mitte
   GPU-Z          Unten
   eigene         keine Vorgabe (frei wählbar)
+Übernommen wird erst mit "Speichern", "Abbrechen" (Esc) verwirft alle
+Änderungen. Ungültige Werte (z.B. mehr als 5000 px) meldet eine rote Zeile
+links neben den Knöpfen; die Seite bleibt dann offen. Die Knöpfe stehen
+wie üblich: "Abbrechen" links, "Speichern" ganz rechts. Nach dem Speichern
+geht es zurück zu "Programme", die Meldung steht im Protokoll.
 Gespeichert wird in Positionen.json (_edges, eigene Abstände in _edgegaps).
 Ist bei einem Programm keine Kante angehakt (Vorgabe bei eigenen Programmen),
 wird es nicht ausgerichtet und zeigt "Keine Kanten festgelegt".
 
-Einmalig ausrichten: Die Schaltfläche "Einmalig ausrichten" (oben rechts)
+Einmalig ausrichten: Die Seite "Einmalig ausrichten" (Navigation links)
 richtet ein beliebiges offenes Fenster aus, ohne es in die Liste aufzunehmen.
-1. "Einmalig ausrichten" anklicken; das Fenster wartet sofort auf die Auswahl.
+1. "Einmalig ausrichten" anklicken; die Seite wartet sofort auf die Auswahl.
 2. Auf das gewünschte Fenster klicken (Esc bricht ab). Titel und Programm
-   erscheinen im Dialog; "Fenster anklicken" wählt ein anderes.
+   erscheinen auf der Seite, Fensterpositionen kommt wieder nach vorn;
+   "Fenster anklicken" wählt ein anderes.
 3. Oben, Unten, Links, Rechts, ↔ Mitte oder ↕ Mitte anklicken. Mehrere
    Richtungen nacheinander ergänzen sich (z.B. "Unten" und "↔ Mitte").
 Es gilt der eingestellte Abstand. Nichts wird gespeichert: keine Position,
@@ -319,7 +347,8 @@ Discord, Easy2Sync, GPU-Z), die auf dem Rechner nicht installiert sind und
 nicht laufen, erscheinen nicht in der Liste (steht beim Start im Protokoll).
 Installierte, aber nicht benötigte Programme: Rechtsklick auf die Zeile >
 "… ausblenden". Gespeicherte Positionen bleiben dabei erhalten.
-Wieder anzeigen: Rechtsklick in die Liste > "Ausgeblendete wieder anzeigen".
+Wieder anzeigen: Rechtsklick in die Liste > "Ausgeblendete wieder anzeigen"
+(auch unter Navigation > Einstellungen).
 Die Auswahl wird in Positionen.json gespeichert (_hidden).
 
 Eigene Programme hinzufügen
@@ -327,8 +356,9 @@ Eigene Programme hinzufügen
 Über "Programm hinzufügen" (oben rechts in der Programmliste) lässt sich
 jedes geöffnete Fenster aufnehmen, z.B. Browser, Explorer-Programme oder Tools.
 1. Das Programm öffnen und sein Fenster an die gewünschte Stelle schieben.
-2. "Programm hinzufügen" anklicken, das Fenster in der Liste auswählen und
-   bei Bedarf den Namen ändern, dann "Hinzufügen".
+2. "Programm hinzufügen" anklicken: Die Seite listet die offenen Fenster.
+   Fenster auswählen, bei Bedarf den Namen ändern, dann "Hinzufügen"
+   ("Abbrechen" führt ohne Änderung zurück zur Programmliste).
    Die aktuelle Position und Größe werden dabei gleich gespeichert.
 Eigene Programme werden wie Easy2Sync und TeamSpeak 3 behandelt: Sie werden nie beendet,
 "Positionen speichern" misst das offene Fenster, "Wiederherstellen" verschiebt
@@ -368,8 +398,9 @@ Die Bilder zeigen eine Demo-Ansicht: ohne eigene Programme, ohne
 Administrator-Hinweis und mit %LOCALAPPDATA% statt des Benutzerordners. Auch
 das Protokoll zeigt Pfade so an. Erzeugt werden je hell und dunkel:
 Hauptfenster, ein Demo-Ablauf (eigenes Programm hinzugefügt, Fenster
-ausgerichtet), das Info-Fenster und der Dialog "Programm hinzufügen" mit einer
-festen Demo-Liste statt der offenen Fenster. Fehler stehen in
+ausgerichtet), die Seite "Kanten je Programm" mit den Vorgaben, die Seite
+"Programm hinzufügen" mit einer festen Demo-Liste statt der offenen Fenster
+und das Info-Fenster. Fehler stehen in
 Screenshots\Fehler.txt (wird nicht hochgeladen).
 Downloads (Releases) baut GitHub automatisch als ZIP mit der EXE und dieser
 Anleitung; die Release-Seite zeigt oben die Änderungen der Version.
@@ -446,6 +477,21 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.47           Die Seiten nutzen die volle Breite und Höhe des Fensters: Bei
+               "Kanten je Programm" wachsen die Spalten mit, die Tabelle füllt die
+               Höhe; bei "Programm hinzufügen" wächst die Fensterliste mit.
+2.45 bis 2.46  Navigation links wie in den anderen Programmen: "Programme",
+               "Kanten je Programm" und "Einmalig ausrichten" sind Seiten im
+               Hauptfenster statt eigener Fenster, ebenso "Programm hinzufügen";
+               unten "Einstellungen" mit Sicherungen, Protokollen, Anleitung und
+               Info. Einklappbar und anpinnbar (Standard: angepinnt).
+               Meldungen und Rückfragen im Programmdesign (hell/dunkel, Symbol
+               als farbiger Kreis, deutsche Knöpfe) statt Windows-Meldungsfenster;
+               beim Entfernen eines Programms ist "Nein" vorausgewählt.
+               "Abbrechen" links, "Speichern" bzw. "Hinzufügen" ganz rechts;
+               Eingabefehler erscheinen als rote Zeile, die Seite bleibt offen.
+               Versions-Plakette wieder wie in allen Programmen senkrecht mittig
+               zum Namen.
 2.44           Versions-Plakette senkrecht mittig zu den Großbuchstaben des
                Namens (vorher etwas zu hoch).
 2.39 bis 2.43  Update-Prüfung über GitHub: beim Start (höchstens täglich) und

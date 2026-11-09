@@ -37,7 +37,8 @@ The interface is in German.
 - Restart as administrator with one click (needed for programs running elevated).
 - **Update check** against the GitHub releases (at most once a day at start, or from the About window); a newer version can be installed with one click (“Jetzt aktualisieren”), settings are kept.
 - **Log** in the window and as a daily log file (kept 30 days).
-- Windows 11 design: light/dark mode and accent color follow Windows live.
+- **Navigation on the left** like in my other programs: “Programme”, “Kanten je Programm” and “Einmalig ausrichten” are pages in the main window; settings menu at the bottom. Collapsible and pinnable.
+- Windows 11 design: light/dark mode and accent color follow Windows live; messages and questions in the same design.
 
 ### Installation
 
@@ -83,7 +84,8 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 - Neustart als Administrator per Klick (nötig für Programme, die mit Administratorrechten laufen).
 - **Update-Prüfung** über die GitHub-Releases (beim Start höchstens einmal täglich oder im Info-Fenster); eine neuere Version lässt sich per Klick installieren („Jetzt aktualisieren“), Einstellungen bleiben erhalten.
 - **Protokoll** im Fenster und als Tagesdatei (30 Tage aufbewahrt).
-- Windows-11-Design: Hell/Dunkel und Akzentfarbe folgen Windows sofort.
+- **Navigation links** wie in meinen anderen Programmen: „Programme“, „Kanten je Programm“ und „Einmalig ausrichten“ sind Seiten im Hauptfenster; unten das Einstellungsmenü. Einklappbar und anpinnbar.
+- Windows-11-Design: Hell/Dunkel und Akzentfarbe folgen Windows sofort; Meldungen und Rückfragen im selben Design.
 
 ### Installation
 
@@ -121,6 +123,11 @@ Selbsttest: `"Fensterpositionen wiederherstellen.exe" --self-test` (arbeitet nur
     <td><img src="Screenshots/ablauf-dunkel.png" alt="Aligning windows / Fenster ausrichten, dunkel"></td>
   </tr>
   <tr><td colspan="2" align="center">Own program added, windows aligned · Eigenes Programm hinzugefügt, Fenster ausgerichtet</td></tr>
+  <tr>
+    <td><img src="Screenshots/kanten-hell.png" alt="Edges per program / Kanten je Programm, hell"></td>
+    <td><img src="Screenshots/kanten-dunkel.png" alt="Edges per program / Kanten je Programm, dunkel"></td>
+  </tr>
+  <tr><td colspan="2" align="center">Edges per program · Kanten je Programm</td></tr>
   <tr>
     <td><img src="Screenshots/hinzufuegen-hell.png" alt="Add program / Programm hinzufügen, hell"></td>
     <td><img src="Screenshots/hinzufuegen-dunkel.png" alt="Add program / Programm hinzufügen, dunkel"></td>

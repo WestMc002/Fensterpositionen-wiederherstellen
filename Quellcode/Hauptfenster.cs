@@ -1,4 +1,4 @@
-﻿// Fensterpositionen wiederherstellen – Hauptfenster mit Programmliste, Aktionen und Protokoll
+﻿// Fensterpositionen wiederherstellen – Hauptfenster mit Navigation, Programmliste, Aktionen und Protokoll
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@ public class MainForm:Form {
  // Demo-Ansicht für die Screenshots (--screenshots): ohne eigene Programme und ohne Datenübernahme.
  public static bool DemoMode;
  ProgramList list=new ProgramList();
- ModernButton restore,save,all,folder,admin,addProgram,oneTime;
+ ModernButton restore,save,all,admin,addProgram;
  // Ausrichten: je eine Schaltfläche pro Kante und "Automatisch" (Regeln je Programm), Abstand frei wählbar.
  ModernButton alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules;
  readonly TextBox gapBox=new TextBox();
@@ -50,6 +50,20 @@ public class MainForm:Form {
  readonly List<Entry> builtIns=new List<Entry>();
  Dictionary<string,object> profiles;
  bool busy;
+ // Navigation links (Globale Richtlinien; Vorlage: Wake on LAN): angepinnt = immer offen und schiebt den Inhalt;
+ // sonst nur Symbole, ☰ klappt sie über dem Inhalt aus, nach der Auswahl bzw. beim Verlassen klappt sie wieder ein.
+ Panel nav,navSpacer,headerHost,footerHost;
+ NavButton navMenu,navPin,navPrograms,navEdges,navOneTime,navMore;
+ readonly System.Windows.Forms.Timer navTimer=new System.Windows.Forms.Timer{Interval=400};
+ bool navOpen;
+ // Seiten im selben Fenster: "Kanten je Programm", "Einmalig ausrichten" und "Programm hinzufügen" sind die
+ // bisherigen Dialoge, ohne Rahmen im Inhaltsbereich eingebettet (wie Wake on LAN, ShowView).
+ Panel viewHost,viewBody;
+ Label viewTitle;
+ Form view;
+ Action<DialogResult> viewDone;
+ // Breite des Inhalts ohne Navigation (die Ausrichten-Zeile passt gerade hinein).
+ int ContentWidth{get{return Ui.Px(1088);}}
  public MainForm() {
   // Screenshots (Demo-Ansicht): kein Administrator-Hinweis, auch wenn Erstellen.bat erhöht läuft.
   bool elevated=!DemoMode&&IsElevated();
@@ -58,7 +72,8 @@ public class MainForm:Form {
   StartPosition=FormStartPosition.CenterScreen;
   // Einstellungen aus dem alten Ordner (bis Version 2.12) einmalig übernehmen.
   string migrated=DemoMode?null:Store.MigrateOldFolder();
-  Setup();profiles=Store.Load();
+  // Screenshots: ohne gespeicherte Einstellungen (Vorgaben, Abstand 18, Navigation angepinnt).
+  Setup();profiles=DemoMode?new Dictionary<string,object>():Store.Load();
   builtIns.AddRange(entries);
   string skipped=null,hiddenNames=null;
   if(!DemoMode) {
@@ -71,8 +86,8 @@ public class MainForm:Form {
    entries.RemoveAll(x=>missing.Contains(x)||off.Contains(x));
    entries.AddRange(Store.CustomEntries(profiles));
   }
-  restore=new ModernButton("Wiederherstellen",ButtonKind.Primary,"");
-  save=new ModernButton("Positionen speichern",ButtonKind.Secondary,"");
+  restore=new ModernButton("Wiederherstellen",ButtonKind.Primary,"\uE777");
+  save=new ModernButton("Positionen speichern",ButtonKind.Secondary,"\uE74E");
   alignTop=new ModernButton("Oben",ButtonKind.Secondary,"\uE74A");
   alignBottom=new ModernButton("Unten",ButtonKind.Secondary,"\uE74B");
   alignLeft=new ModernButton("Links",ButtonKind.Secondary,"\uE72B");
@@ -81,25 +96,23 @@ public class MainForm:Form {
   alignHCenter=new ModernButton("↔ Mitte",ButtonKind.Secondary,null);
   alignVCenter=new ModernButton("↕ Mitte",ButtonKind.Secondary,null);
   alignAuto=new ModernButton("Automatisch",ButtonKind.Secondary,"\uE740");
-  folder=new ModernButton("Sicherungen öffnen",ButtonKind.Secondary,"");
-  // Beliebiges offenes Fenster einmalig ausrichten, ohne es in die Liste aufzunehmen.
-  oneTime=new ModernButton("Einmalig ausrichten",ButtonKind.Secondary,"\uE7C9");
-  oneTime.Margin=new Padding(0);
   all=new ModernButton("Alle auswählen",ButtonKind.Ghost,null);
-  all.Height=Ui.Px(32);all.Margin=new Padding(0);folder.Margin=new Padding(0);
+  all.Height=Ui.Px(32);all.Margin=new Padding(0);
   addProgram=new ModernButton("Programm hinzufügen",ButtonKind.Ghost,"\uE710");
   addProgram.Height=Ui.Px(32);addProgram.Margin=new Padding(0);
 
-  var header=new HeaderPanel{Dock=DockStyle.Fill,Margin=new Padding(0,0,0,Ui.Px(12)),Title=AppInfo.Product,Subtitle="Fenster sichern, ausrichten und wiederherstellen",Badge="Version "+AppInfo.Version};
+  var header=new HeaderPanel{Dock=DockStyle.Fill,Title=AppInfo.Product,Subtitle="Fenster sichern, ausrichten und wiederherstellen",Badge="Version "+AppInfo.Version};
   header.Logo=LoadLogo(Ui.Px(48));
   signature=LoadSignature();
   header.BadgeClick+=(s,e)=>ShowInfo();
   footer.Dock=DockStyle.Fill;footer.Margin=new Padding(0);footer.Logo=signature;
   // Globale Richtlinie: links "© <Jahr> · <Programmname>".
   footer.Caption="© "+DateTime.Now.Year+" · "+AppInfo.Product;
-  header.Controls.Add(folder);
-  header.Controls.Add(oneTime);
-  oneTime.Click+=(s,e)=>AlignOneWindow();
+  // Kopf und Fußzeile über die volle Breite, dazwischen Navigation und Inhalt.
+  headerHost=new Panel{Dock=DockStyle.Top,Height=Ui.Px(18)+Ui.Px(76),Padding=new Padding(Ui.Px(24),Ui.Px(18),Ui.Px(24),Ui.Px(12)),BackColor=Ui.Bg};
+  headerHost.Controls.Add(header);
+  footerHost=new Panel{Dock=DockStyle.Bottom,Height=Ui.Px(66),Padding=new Padding(Ui.Px(24),0,Ui.Px(24),Ui.Px(2)),BackColor=Ui.Bg};
+  footerHost.Controls.Add(footer);
   if(!elevated) {
    // Manche Programme (z.B. Easy2Sync) laufen mit Administratorrechten; ihre Fenster lassen sich nur mit gleichen Rechten verschieben.
    admin=new ModernButton("Als Administrator",ButtonKind.Secondary,"\uE7EF");
@@ -108,10 +121,7 @@ public class MainForm:Form {
    header.Controls.Add(admin);
   }
   header.Resize+=(s,e)=>{
-   folder.Location=new Point(header.Width-folder.Width,(header.Height-folder.Height)/2);
-   if(admin!=null)admin.Location=new Point(folder.Left-Ui.Px(8)-admin.Width,(header.Height-admin.Height)/2);
-   int oneTimeRight=(admin!=null?admin.Left:folder.Left)-Ui.Px(8);
-   oneTime.Location=new Point(oneTimeRight-oneTime.Width,(header.Height-oneTime.Height)/2);
+   if(admin!=null)admin.Location=new Point(header.Width-Ui.Px(4)-admin.Width,(header.Height-admin.Height)/2);
   };
 
   activity.Dock=DockStyle.Fill;activity.Margin=new Padding(0,0,0,Ui.Px(14));
@@ -150,7 +160,7 @@ public class MainForm:Form {
   gapBox.KeyPress+=(s,e)=>{if(!Char.IsDigit(e.KeyChar)&&!Char.IsControl(e.KeyChar))e.Handled=true;};
   gapBox.Leave+=(s,e)=>SaveGap();
   gapCard.Controls.Add(gapBox);
-  alignRules=new ModernButton("Kanten je Programm",ButtonKind.Ghost,"\uE713");
+  alignRules=new ModernButton("Kanten je Programm",ButtonKind.Ghost,"\uE9A6");
   // "Kanten je Programm" steht oben in der Kopfzeile der Programmliste (die Ausrichten-Zeile ist voll).
   alignRules.Height=Ui.Px(32);alignRules.Margin=new Padding(0);
   alignRules.Click+=(s,e)=>EditEdges();
@@ -163,7 +173,6 @@ public class MainForm:Form {
   alignTips.SetToolTip(alignBottom,"Ausgewählte Fenster an die Unterkante des Arbeitsbereichs setzen (z.B. über die Taskleiste)");
   alignTips.SetToolTip(alignLeft,"Ausgewählte Fenster an den linken Rand setzen");
   alignTips.SetToolTip(alignRight,"Ausgewählte Fenster an den rechten Rand setzen");
-  alignTips.SetToolTip(oneTime,"Ein beliebiges offenes Fenster anklicken und einmalig ausrichten\r\n(wird nicht in die Liste aufgenommen, nichts wird gespeichert)");
   alignTips.SetToolTip(save,"Lage, Größe und Bildschirm der ausgewählten Fenster merken.\r\nNötig für alles, was unter „Kanten je Programm“ nicht angehakt ist (z.B. die Breite bei nur Oben/Unten),\r\nund für Programme ohne angehakte Kante.");
   alignTips.SetToolTip(restore,"Gespeicherte Lage, Größe und Bildschirm wiederherstellen,\r\ndanach die angehakten Kanten aus „Kanten je Programm“ ausrichten.");
   alignTips.SetToolTip(alignHCenter,"Ausgewählte Fenster waagerecht mittig setzen (gleicher Abstand links und rechts)");
@@ -185,10 +194,11 @@ public class MainForm:Form {
   logCard.Controls.Add(log);logCard.Controls.Add(logTitle);log.BringToFront();
 
   int programsHeight=ProgramsHeight(entries.Count);
-  int fixedHeight=Ui.Px(76)+Ui.Px(17)+Ui.Px(52)+Ui.Px(52)+Ui.Px(88)+Ui.Px(64)+Ui.Px(18)+Ui.Px(2);
-  layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(Ui.Px(24),Ui.Px(18),Ui.Px(24),Ui.Px(2)),ColumnCount=1,RowCount=9,BackColor=Ui.Bg};
+  // Kopf (18 + 76), Fußzeile (66) und die festen Zeilen der Startseite.
+  int fixedHeight=Ui.Px(18)+Ui.Px(76)+Ui.Px(66)+Ui.Px(17)+Ui.Px(52)+Ui.Px(52)+Ui.Px(88);
+  // Seitenrand 28 rechts und links, links gemessen ab dem Rand der Navigation (Globale Richtlinien).
+  layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(Ui.Px(28),0,Ui.Px(28),0),ColumnCount=1,RowCount=7,BackColor=Ui.Bg};
   layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-  layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(76)));
   // Zeile für den Update-Hinweis: Höhe 0, bis eine neuere Version gefunden wird.
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,0));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(17)));
@@ -197,14 +207,21 @@ public class MainForm:Form {
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(52)));
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(88)));
   layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-  layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(64)));
   updateBar.Dock=DockStyle.Fill;updateBar.Margin=new Padding(0,0,0,Ui.Px(10));updateBar.Visible=false;
   updateBar.Install.Click+=async(s,e)=>await InstallUpdate();
   updateBar.Page.Click+=(s,e)=>OpenReleasePage();
   updateBar.Later.Click+=(s,e)=>ShowUpdateBar(false);
-  layout.Controls.Add(header,0,0);layout.Controls.Add(updateBar,0,1);layout.Controls.Add(activity,0,2);layout.Controls.Add(programsCard,0,3);
-  layout.Controls.Add(actions,0,4);layout.Controls.Add(alignRow,0,5);layout.Controls.Add(hint,0,6);layout.Controls.Add(logCard,0,7);layout.Controls.Add(footer,0,8);
+  layout.Controls.Add(updateBar,0,0);layout.Controls.Add(activity,0,1);layout.Controls.Add(programsCard,0,2);
+  layout.Controls.Add(actions,0,3);layout.Controls.Add(alignRow,0,4);layout.Controls.Add(hint,0,5);layout.Controls.Add(logCard,0,6);
+  BuildNavigation();
+  // Andockreihenfolge: Kopf und Fußzeile über die volle Breite, dann Navigation, dann Inhalt bzw. Seite.
+  Controls.Add(viewHost);
   Controls.Add(layout);
+  Controls.Add(navSpacer);
+  Controls.Add(footerHost);
+  Controls.Add(headerHost);
+  Controls.Add(nav); // nicht angedockt: liegt ausgeklappt über dem Inhalt
+  nav.BringToFront();
 
   foreach(var e in entries) list.Add(new ProgramRow{Entry=e,Name=e.Name,Checked=false}); // Beim Start ist nichts angehakt.
   list.CheckedChanged+=(s,e)=>UpdateSelection();
@@ -213,12 +230,16 @@ public class MainForm:Form {
   UpdateSelection();
 
   Rectangle work=Screen.PrimaryScreen.WorkingArea;
-  ClientSize=new Size(Ui.Px(1080),fixedHeight+programsHeight+Ui.Px(230));
+  ClientSize=new Size(NavSpace()+ContentWidth,fixedHeight+programsHeight+Ui.Px(230));
   int chrome=Height-ClientSize.Height;
-  // Mindestbreite = Startbreite: sonst überlappen Kopfzeile und Ausrichten-Zeile.
+  // Mindestbreite: Navigation + Inhalt (sonst überlappt die Ausrichten-Zeile); wird in ApplyNav nachgeführt.
   MinimumSize=new Size(Math.Min(Width,work.Width),Math.Min(fixedHeight+programsHeight+Ui.Px(120)+chrome,work.Height));
   if(Height>work.Height)Height=work.Height;
   if(Width>work.Width)Width=work.Width;
+  Resize+=(s,e)=>ApplyNav();
+  footerHost.LocationChanged+=(s,e)=>ApplyNav();
+  headerHost.SizeChanged+=(s,e)=>ApplyNav();
+  ApplyNav();
 
   all.Click+=(s,e)=>{bool select=list.Rows.Any(x=>!x.Checked);foreach(var row in list.Rows)row.Checked=select;UpdateSelection();};
   restore.Click+=async(s,e)=>await Run(false);
@@ -230,9 +251,9 @@ public class MainForm:Form {
   alignHCenter.Click+=async(s,e)=>await AlignWindows("hcenter");
   alignVCenter.Click+=async(s,e)=>await AlignWindows("vcenter");
   alignAuto.Click+=async(s,e)=>await AlignWindows("auto");
-  folder.Click+=OpenBackups;
   addProgram.Click+=(s,e)=>AddProgram();
   FormClosing+=(s,e)=>{if(busy)e.Cancel=true;};
+  FormClosed+=(s,e)=>navTimer.Stop();
   ApplyTheme();
   Log(AppInfo.Product+" Version "+AppInfo.Version+" – Farbschema: "+(Ui.Dark?"dunkel":"hell")+", Akzentfarbe "+Ui.Hex(Ui.AccentBase));
   TraceLog.Cleanup(30);
@@ -277,11 +298,232 @@ public class MainForm:Form {
    bool card=inCard;
    if(control is Card){control.BackColor=Ui.Bg;card=true;}
    else if(!(control is ModernButton))control.BackColor=inCard?Ui.Surface:Ui.Bg;
-   if(control is Label)control.ForeColor=(control.Tag as string)=="muted"?Ui.Muted:Ui.TextColor;
+   if(control is Label) {
+    string tag=control.Tag as string;
+    control.ForeColor=tag=="muted"?Ui.Muted:tag=="accent"?Ui.Accent:tag=="error"?Ui.ErrorColor:Ui.TextColor;
+   }
    if(control is TextBox)control.ForeColor=Ui.TextColor;
    ApplyTheme(control,card);
   }
  }
+ // ================================================================== Navigation
+ // Navigation links (Globale Richtlinien, Navigation; Referenz: Wake on LAN, MainForm.ApplyNav/LayoutNav):
+ // ausgeklappt 230, eingeklappt 68 (nur Symbole); oben ☰ und die Stecknadel, unten "Einstellungen" (Menü).
+ // "Beenden" gibt es nicht: Fensterpositionen läuft nicht im Infobereich, das X beendet das Programm.
+ void BuildNavigation() {
+  navSpacer=new Panel{Dock=DockStyle.Left,BackColor=Ui.Bg};
+  nav=new Panel{BackColor=Ui.Bg};
+  nav.Paint+=(s,e)=>{
+   // Ausgeklappt über dem Inhalt: feine Trennlinie rechts.
+   if(navOpen&&!NavPinned())using(var pen=new Pen(Ui.Border))e.Graphics.DrawLine(pen,nav.Width-1,0,nav.Width-1,nav.Height);
+  };
+  navMenu=AddNav("",'\uE700',()=>{
+   if(NavPinned())SetNavPinned(false);
+   else {navOpen=!navOpen;ApplyNav();}
+  });
+  navMenu.AccessibleName="Navigation aus- bzw. einklappen";
+  alignTips.SetToolTip(navMenu,"Navigation aus- bzw. einklappen");
+  navPin=AddNav("",'\uE718',()=>SetNavPinned(!NavPinned()));
+  navPin.IconOnly=true;
+  navPrograms=AddNav("Programme",'\uE8FD',()=>{CloseNav();CloseView();});
+  navPrograms.Selected=true;
+  navEdges=AddNav("Kanten je Programm",'\uE9A6',EditEdges);
+  navOneTime=AddNav("Einmalig ausrichten",'\uE7C9',AlignOneWindow);
+  alignTips.SetToolTip(navOneTime,"Ein beliebiges offenes Fenster anklicken und einmalig ausrichten\r\n(wird nicht in die Liste aufgenommen, nichts wird gespeichert)");
+  navMore=AddNav("Einstellungen",'\uE713',ShowSettingsMenu);
+  nav.Resize+=(s,e)=>LayoutNav();
+  navTimer.Tick+=(s,e)=>{
+   // Ausgeklappt, nicht angepinnt: wieder einklappen, sobald die Maus die Navigation verlässt.
+   if(!navOpen||NavPinned()||nav.Capture||!Visible)return;
+   if(!nav.RectangleToScreen(nav.ClientRectangle).Contains(Cursor.Position)){navOpen=false;ApplyNav();}
+  };
+  navTimer.Start();
+  // Seiten: Überschrift wie Wake on LAN (Segoe UI Semibold 20 pt), darunter das eingebettete Fenster.
+  viewTitle=new Label{Dock=DockStyle.Top,Height=Ui.Px(56),Font=new Font("Segoe UI Semibold",20f),ForeColor=Ui.TextColor,BackColor=Ui.Bg,TextAlign=ContentAlignment.MiddleLeft,UseMnemonic=false};
+  viewBody=new Panel{Dock=DockStyle.Fill,BackColor=Ui.Bg,AutoScroll=true};
+  // Die eingebetteten Fenster haben selbst 24 Rand: Überschrift und Inhalt beginnen so beide bei 28.
+  viewHost=new Panel{Dock=DockStyle.Fill,BackColor=Ui.Bg,Visible=false,Padding=new Padding(Ui.Px(4),0,Ui.Px(4),Ui.Px(4))};
+  viewTitle.Padding=new Padding(Ui.Px(24),0,0,0);
+  viewHost.Controls.Add(viewBody);
+  viewHost.Controls.Add(viewTitle);
+ }
+ NavButton AddNav(string text,char glyph,Action click) {
+  var button=new NavButton(text,glyph);
+  button.Click+=(s,e)=>click();
+  nav.Controls.Add(button);
+  return button;
+ }
+ // Angepinnt (Standard) oder einklappbar; gespeichert in Positionen.json ("_nav": pinned).
+ bool NavPinned() {
+  if(DemoMode)return true;
+  var saved=profiles!=null&&profiles.ContainsKey("_nav")?profiles["_nav"] as Dictionary<string,object>:null;
+  try {return saved==null||!saved.ContainsKey("pinned")||Convert.ToBoolean(saved["pinned"]);} catch {return true;}
+ }
+ int NavSpace(){return NavPinned()?Ui.Px(230):Ui.Px(68);}
+ void SetNavPinned(bool pinned) {
+  if(!DemoMode) {
+   try {
+    var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+    copy["_nav"]=new Dictionary<string,object>{{"pinned",pinned}};
+    Store.Write(Store.Profiles,copy);
+    profiles=copy;
+   } catch(Exception ex) {Log("Navigation: Einstellung konnte nicht gespeichert werden – "+ex.Message);}
+  }
+  navOpen=pinned;
+  ApplyNav();
+ }
+ // Ausgeklappte (nicht angepinnte) Navigation nach einer Auswahl wieder einklappen.
+ void CloseNav(){if(!NavPinned()&&navOpen){navOpen=false;ApplyNav();}}
+ void ApplyNav() {
+  if(nav==null||footerHost==null||headerHost==null)return;
+  bool pinned=NavPinned();
+  bool open=pinned||navOpen;
+  int full=Ui.Px(230),compact=Ui.Px(68);
+  int space=pinned?full:compact;
+  if(navSpacer.Width!=space) {
+   navSpacer.Width=space;
+   // Mindestbreite mitführen: Angepinnt braucht das Fenster die Navigation zusätzlich zum Inhalt.
+   Rectangle work=Screen.FromControl(this).WorkingArea;
+   int min=Math.Min(space+ContentWidth+(Width-ClientSize.Width),work.Width);
+   MinimumSize=new Size(min,MinimumSize.Height);
+   if(WindowState==FormWindowState.Normal&&Right>work.Right)Left=Math.Max(work.Left,work.Right-Width);
+  }
+  int top=headerHost.Bottom,h=Math.Max(0,footerHost.Top-headerHost.Bottom);
+  nav.SetBounds(0,top,open?full:compact,h);
+  nav.BringToFront();
+  navPin.Visible=open;
+  navPin.Glyph=pinned?'\uE77A':'\uE718';
+  string pinText=pinned?"Navigation lösen (einklappbar)":"Navigation anpinnen";
+  navPin.AccessibleName=pinText;
+  alignTips.SetToolTip(navPin,pinText);
+  nav.Invalidate();
+  LayoutNav();
+ }
+ void LayoutNav() {
+  if(navMore==null)return;
+  int x=Ui.Px(10),w=nav.Width-Ui.Px(20),h=navPrograms.Height;
+  int y=Ui.Px(4);
+  navMenu.SetBounds(x,y,Ui.Px(48),h);
+  navPin.SetBounds(nav.Width-Ui.Px(10)-Ui.Px(36),y+(h-Ui.Px(36))/2,Ui.Px(36),Ui.Px(36));
+  y+=h+Ui.Px(10);
+  foreach(var b in new[]{navPrograms,navEdges,navOneTime}) {
+   b.SetBounds(x,y,w,h);
+   y+=h+Ui.Px(4);
+  }
+  int bottom=nav.Height-Ui.Px(14);
+  navMore.SetBounds(x,bottom-h,w,h);
+ }
+ // Einstellungen (Zahnrad): Menü rechts über dem Knopf.
+ readonly ContextMenuStrip settingsMenu=new ContextMenuStrip();
+ void ShowSettingsMenu() {
+  CloseNav();
+  NavButton current=viewTitle.Tag as NavButton??navPrograms;
+  current.Selected=false;
+  navMore.Selected=true; // ausgewählt, solange das Menü offen ist
+  MenuStyle.Prepare(settingsMenu);
+  settingsMenu.Items.Add(MenuStyle.TopSpacer());
+  settingsMenu.Items.Add(MenuStyle.Item("Sicherungen öffnen",'\uE838',(s,a)=>OpenBackups(s,a)));
+  settingsMenu.Items.Add(MenuStyle.Item("Protokolle öffnen",'\uE81C',(s,a)=>OpenFolder(TraceLog.Folder)));
+  string guide=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Anleitung.txt");
+  var guideItem=MenuStyle.Item("Anleitung öffnen",'\uE8A5',(s,a)=>{try{Process.Start(guide);}catch(Exception ex){MessageBox.Show(this,ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);}});
+  guideItem.Enabled=System.IO.File.Exists(guide);
+  settingsMenu.Items.Add(guideItem);
+  var hidden=HiddenBuiltIns();
+  if(hidden.Count>0) {
+   settingsMenu.Items.Add(new ToolStripSeparator());
+   var showHidden=MenuStyle.Item("Ausgeblendete wieder anzeigen ("+hidden.Count+")",'\uE890',(s,a)=>ShowHiddenPrograms());
+   showHidden.Enabled=!busy;
+   settingsMenu.Items.Add(showHidden);
+  }
+  settingsMenu.Items.Add(new ToolStripSeparator());
+  settingsMenu.Items.Add(MenuStyle.Item("Info über "+AppInfo.Product,'\uE946',(s,a)=>BeginInvoke((Action)ShowInfo)));
+  settingsMenu.Items.Add(MenuStyle.BottomSpacer());
+  ToolStripDropDownClosedEventHandler closed=null;
+  closed=(s,e)=>{
+   settingsMenu.Closed-=closed;
+   navMore.Selected=false;
+   if(view==null)navPrograms.Selected=true;
+   else current.Selected=viewTitle.Tag==current;
+  };
+  settingsMenu.Closed+=closed;
+  settingsMenu.Opened-=SettingsMenuOpened;
+  settingsMenu.Opened+=SettingsMenuOpened;
+  settingsMenu.Show(navMore,new Point(navMore.Width+Ui.Px(4),navMore.Height),ToolStripDropDownDirection.AboveRight);
+ }
+ void SettingsMenuOpened(object sender,EventArgs e){MenuStyle.RoundCorners(settingsMenu);}
+ void OpenFolder(string path) {
+  try {Directory.CreateDirectory(path);Process.Start("explorer.exe",Quote(path));}
+  catch(Exception ex) {MessageBox.Show(this,ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+ }
+
+ // ================================================================== Seiten im selben Fenster
+ // Zeigt ein bisheriges Dialogfenster als Seite im Inhaltsbereich (ohne Rahmen, eingebettet).
+ // "Abbrechen" bzw. "Speichern" führen zurück zu "Programme"; done erhält das Ergebnis.
+ void ShowView(NavButton item,Form f,Action<DialogResult> done,string title) {
+  if(title==null)title=item.Text;
+  CloseNav();
+  if(view!=null&&viewTitle.Tag==item&&viewTitle.Text==title){f.Dispose();return;} // schon offen
+  CloseView();
+  var size=f.ClientSize;
+  f.TopLevel=false;
+  f.FormBorderStyle=FormBorderStyle.None;
+  f.ShowInTaskbar=false;
+  f.ClientSize=size;
+  // Die Seite füllt den Inhaltsbereich (volle Breite); kleiner als ihre Startbreite wird sie nicht,
+  // in der Höhe darf sie bis 480 schrumpfen (darunter scrollt der Bereich).
+  f.MinimumSize=new Size(size.Width,Math.Min(size.Height,Ui.Px(480)));
+  f.Dock=DockStyle.Fill;
+  // Knöpfe mit DialogResult schließen ein eingebettetes Fenster nicht von selbst.
+  foreach(var b in AllButtons(f)) {
+   var button=b;
+   if(button.DialogResult!=DialogResult.None)
+    button.Click+=(s,e)=>{f.DialogResult=button.DialogResult;BeginInvoke((Action)f.Close);};
+  }
+  f.FormClosed+=(s,e)=>BeginInvoke((Action)(()=>EndView(f)));
+  view=f;
+  viewDone=done;
+  viewTitle.Text=title;
+  viewTitle.Tag=item;
+  foreach(var n in new[]{navPrograms,navEdges,navOneTime})n.Selected=n==item;
+  layout.Visible=false;
+  viewBody.Controls.Add(f);
+  viewHost.Visible=true;
+  viewHost.BringToFront();
+  nav.BringToFront();
+  f.Show();
+  f.Focus();
+ }
+ static IEnumerable<Button> AllButtons(Control c) {
+  foreach(Control child in c.Controls) {
+   var b=child as Button;
+   if(b!=null)yield return b;
+   foreach(var inner in AllButtons(child))yield return inner;
+  }
+ }
+ // Offene Seite schließen (wie "Abbrechen") und zurück zu "Programme".
+ void CloseView() {
+  var f=view;
+  if(f==null)return;
+  f.DialogResult=DialogResult.Cancel;
+  f.Close();
+  EndView(f);
+ }
+ void EndView(Form f) {
+  if(view!=f)return;
+  var done=viewDone;
+  var result=f.DialogResult;
+  view=null;viewDone=null;
+  viewTitle.Tag=null;
+  viewBody.Controls.Remove(f);
+  if(!f.IsDisposed)f.Dispose();
+  viewHost.Visible=false;
+  layout.Visible=true;
+  foreach(var n in new[]{navEdges,navOneTime})n.Selected=false;
+  navPrograms.Selected=true;
+  nav.BringToFront();
+  if(done!=null)done(result);
+ }
+
  // Das Logo kommt aus der eingebetteten ICO-Datei (Erstellen.bat) oder aus Resources\Fensterpositionen.ico.
  // Die ICO enthält PNG-Bilder; Icon.ToBitmap liest diese nicht zuverlässig, daher eigener Leser.
  void OpenBackups(object sender,EventArgs e){string p=Path.Combine(Store.Root,"Sicherungen");Directory.CreateDirectory(p);Process.Start("explorer.exe",Quote(p));}
@@ -509,6 +751,9 @@ public class MainForm:Form {
   Log("Franz: Unten: 18 px");
   Log("Zum dauerhaften Übernehmen der ausgerichteten Fenster jetzt Positionen speichern.");
  }
+ // Screenshots: Seiten "Kanten je Programm" und "Programm hinzufügen" im Hauptfenster.
+ internal void DemoShowEdges(){EditEdges();}
+ internal void DemoShowAdd(){AddProgram();}
  void UpdateSelection() {
   int count=list.Rows.Count(x=>x.Checked);
   selectionInfo.Text=count+" von "+list.Rows.Count+" ausgewählt";
@@ -516,7 +761,7 @@ public class MainForm:Form {
  }
  void SetBusy(bool on) {
   busy=on;list.Enabled=!on;
-  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules,folder,admin,addProgram,oneTime})if(button!=null)button.Enabled=!on;
+  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules,admin,addProgram,navEdges,navOneTime})if(button!=null)button.Enabled=!on;
   activity.Active=on;
  }
  static string Quote(string s){return "\""+s+"\"";}
@@ -688,7 +933,9 @@ public class MainForm:Form {
  // Einmalig ausrichten: ein angeklicktes Fenster ausrichten; nichts wird gespeichert.
  void AlignOneWindow() {
   if(busy)return;
-  using(var dialog=new OneTimeAlignForm(Icon,()=>CurrentGap(),Log)) dialog.ShowDialog(this);
+  var page=new OneTimeAlignForm(Icon,()=>CurrentGap(),Log);
+  ShowView(navOneTime,page,null,null);
+  if(view==page)BeginInvoke((Action)page.Begin);
  }
  void EditEdges() {
   if(busy)return;
@@ -696,13 +943,13 @@ public class MainForm:Form {
   var currentGaps=new Dictionary<string,Dictionary<string,int>>(StringComparer.OrdinalIgnoreCase);
   var currentRefs=new Dictionary<string,Dictionary<string,string>>(StringComparer.OrdinalIgnoreCase);
   foreach(var e in entries){current[e.Id]=EdgesFor(e.Id);currentGaps[e.Id]=GapsFor(e.Id);currentRefs[e.Id]=RefsFor(e.Id);}
-  Dictionary<string,HashSet<string>> result;
-  Dictionary<string,Dictionary<string,int>> resultGaps;
-  Dictionary<string,Dictionary<string,string>> resultRefs;
-  using(var dialog=new AlignRulesForm(Icon,entries,current,currentGaps,currentRefs,CurrentGap())) {
-   if(dialog.ShowDialog(this)!=DialogResult.OK)return;
-   result=dialog.Rules;resultGaps=dialog.Gaps;resultRefs=dialog.Refs;
-  }
+  var page=new AlignRulesForm(Icon,entries,current,currentGaps,currentRefs,CurrentGap());
+  // Gespeichert wird erst mit "Speichern"; schlägt das fehl, bleibt die Seite mit der Fehlermeldung offen.
+  // Danach zurück zu "Programme", die Meldung steht im Protokoll.
+  page.Save=()=>SaveEdges(page.Rules,page.Gaps,page.Refs);
+  ShowView(navEdges,page,null,null);
+ }
+ string SaveEdges(Dictionary<string,HashSet<string>> result,Dictionary<string,Dictionary<string,int>> resultGaps,Dictionary<string,Dictionary<string,string>> resultRefs) {
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   var saved=copy.ContainsKey("_edges")?copy["_edges"] as Dictionary<string,object>:null;
   if(saved==null){saved=new Dictionary<string,object>();copy["_edges"]=saved;}
@@ -721,7 +968,7 @@ public class MainForm:Form {
   }
   copy.Remove("_skip");
   try {Store.Write(Store.Profiles,copy);}
-  catch(Exception ex) {Log("Kanten je Programm konnten nicht gespeichert werden: "+ex.Message);return;}
+  catch(Exception ex) {return "Nicht gespeichert: "+ex.Message;}
   profiles=copy;
   var lines=new List<string>();
   foreach(var e in entries) {
@@ -733,6 +980,7 @@ public class MainForm:Form {
    if(result.TryGetValue(e.Id,out set))lines.Add(e.Name+": "+(set.Count>0?String.Join(", ",AllEdges.Where(x=>set.Contains(x)).Select(x=>DirectionName(x)+(gaps.ContainsKey(x)?" "+gaps[x]+" px":"")+(refs.ContainsKey(x)&&EntryById(refs[x])!=null?" an "+EntryById(refs[x]).Name:"")).ToArray()):"keine"));
   }
   Log("Kanten je Programm gespeichert – "+String.Join("; ",lines.ToArray()));
+  return null;
  }
  static string DirectionName(string mode) {
   switch(mode){case "top":return "Oben";case "bottom":return "Unten";case "left":return "Links";case "right":return "Rechts";case "hcenter":return "↔ Mitte";case "vcenter":return "↕ Mitte";default:return "Automatisch";}
@@ -786,8 +1034,9 @@ public class MainForm:Form {
    Log("Zum dauerhaften Übernehmen der ausgerichteten Fenster jetzt Positionen speichern.");
   } finally {SetBusy(false);}
  }
- // Zeilen im Layout: 0 Kopf, 1 Update-Hinweis, 2 Aktivität, 3 Programme, 4 Aktionen, 5 Ausrichten, 6 Hinweis, 7 Protokoll, 8 Footer.
- const int UpdateRow=1,ProgramsRow=3;
+ // Zeilen der Startseite: 0 Update-Hinweis, 1 Aktivität, 2 Programme, 3 Aktionen, 4 Ausrichten, 5 Hinweis, 6 Protokoll
+ // (Kopf und Fußzeile liegen außerhalb, über die volle Fensterbreite).
+ const int UpdateRow=0,ProgramsRow=2;
  // Höhe des Programmbereichs: bis zu 12 Zeilen sichtbar, darüber wird die Liste gescrollt.
  int ProgramsHeight(int count){return list.RowHeight*Math.Max(1,Math.Min(count,12))+Ui.Px(44)+Ui.Px(16)+Ui.Px(14)+2;}
  // Nach Hinzufügen/Entfernen: Programmbereich anpassen, das Fenster wächst bzw. schrumpft mit (begrenzt auf den Bildschirm).
@@ -807,11 +1056,11 @@ public class MainForm:Form {
  }
  void AddProgram() {
   if(busy)return;
-  Entry entry;
-  using(var dialog=new AddProgramForm(Icon,entries)) {
-   if(dialog.ShowDialog(this)!=DialogResult.OK||dialog.Result==null)return;
-   entry=dialog.Result;
-  }
+  var page=new AddProgramForm(Icon,entries);
+  // Unterseite von "Programme": "Hinzufügen" übernimmt, "Abbrechen" bzw. ein Wechsel über die Navigation verwirft.
+  ShowView(navPrograms,page,result=>{if(result==DialogResult.OK&&page.Result!=null)AddEntry(page.Result);},"Programm hinzufügen");
+ }
+ void AddEntry(Entry entry) {
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   string status="Hinzugefügt – Position noch nicht gespeichert";
   string note=null;
@@ -870,7 +1119,7 @@ public class MainForm:Form {
    rowMenu.Items.Add(MenuStyle.Item("Ausgeblendete wieder anzeigen ("+hidden.Count+")",'\uE890',(s,a)=>ShowHiddenPrograms()));
   }
   if(rowMenu.Items.Count>1)rowMenu.Items.Add(new ToolStripSeparator());
-  rowMenu.Items.Add(MenuStyle.Item("Kanten je Programm …",'\uE713',(s,a)=>EditEdges()));
+  rowMenu.Items.Add(MenuStyle.Item("Kanten je Programm …",'\uE9A6',(s,a)=>EditEdges()));
   rowMenu.Items.Add(MenuStyle.BottomSpacer());
   rowMenu.Show(list,e.Location);
  }
@@ -914,7 +1163,7 @@ public class MainForm:Form {
  void RemoveProgram(ProgramRow row) {
   if(busy)return;
   var entry=row.Entry;
-  if(MessageBox.Show(this,"„"+entry.Name+"“ aus der Liste entfernen?\r\nDie gespeicherte Fensterposition wird ebenfalls gelöscht; das Programm selbst bleibt unverändert.","Programm entfernen",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+  if(MessageBox.Show(this,"Die gespeicherte Fensterposition wird ebenfalls gelöscht; das Programm selbst bleibt unverändert.\r\n\r\n„"+entry.Name+"“ aus der Liste entfernen?","Programm entfernen",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   copy.Remove(entry.Id);
   // Auch Ausrichtungsregel, Kanten und eigene Abstände des Programms entfernen.

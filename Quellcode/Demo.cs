@@ -43,7 +43,8 @@ static class Demo {
      string suffix=dark?"dunkel":"hell";
      Shot(backdrop,()=>new MainForm(),null,Path.Combine(outDir,suffix+".png"));
      Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoRun(),Path.Combine(outDir,"ablauf-"+suffix+".png"));
-     Shot(backdrop,()=>new AddProgramForm(icon,new Entry[0]),null,Path.Combine(outDir,"hinzufuegen-"+suffix+".png"));
+     Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoShowEdges(),Path.Combine(outDir,"kanten-"+suffix+".png"));
+     Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoShowAdd(),Path.Combine(outDir,"hinzufuegen-"+suffix+".png"));
      Shot(backdrop,()=>new AboutForm(MainForm.LoadSignature(),icon,null,DemoUpdates()),null,Path.Combine(outDir,"info-"+suffix+".png"));
     }
    }
