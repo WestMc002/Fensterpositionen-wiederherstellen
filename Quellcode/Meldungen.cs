@@ -160,4 +160,96 @@ public class MsgDialog:FixedSizeForm {
   }
  }
 }
+// Eingabe eines kurzen Textes (z.B. Name einer Anordnung) im Stil von MsgDialog.
+// Knöpfe wie bei Unterdialogen: "Abbrechen" links, Primärknopf ganz rechts; Fehler als rote Zeile, das Fenster bleibt offen.
+public class InputDialog:FixedSizeForm {
+ readonly TextBox box=new TextBox();
+ readonly Label error;
+ readonly Func<string,string> validate;
+ public string Value{get{return box.Text.Trim();}}
+ public InputDialog(string heading,string prompt,string initial,string okText,Func<string,string> validate) {
+  this.validate=validate;
+  Text=AppInfo.Product;
+  try {Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);} catch {}
+  AutoScaleMode=AutoScaleMode.None;
+  Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;
+  int pad=Ui.Px(24),width=Ui.Px(460),inner=width-2*pad,y=pad;
+  var flags=TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding|TextFormatFlags.WordBreak;
+  int h=TextRenderer.MeasureText(heading,Ui.UiSemibold,new Size(inner,0),flags).Height;
+  Controls.Add(new Label{Text=heading,Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Bg,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,h+Ui.Px(2))});
+  y+=h+Ui.Px(8);
+  if(!String.IsNullOrEmpty(prompt)) {
+   h=TextRenderer.MeasureText(prompt,Ui.UiFont,new Size(inner,0),flags).Height;
+   Controls.Add(new Label{Text=prompt,Font=Ui.UiFont,ForeColor=Ui.TextColor,BackColor=Ui.Bg,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,h+Ui.Px(2))});
+   y+=h+Ui.Px(12);
+  }
+  var field=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(36)),Padding=new Padding(Ui.Px(10),Ui.Px(8),Ui.Px(10),0)};
+  box.Dock=DockStyle.Fill;box.BorderStyle=BorderStyle.None;box.BackColor=Ui.Surface;box.ForeColor=Ui.TextColor;box.Font=Ui.UiFont;box.MaxLength=40;
+  box.Text=initial??"";
+  box.TextChanged+=(s,e)=>error.Text="";
+  field.Controls.Add(box);
+  Controls.Add(field);
+  y+=field.Height+Ui.Px(6);
+  error=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.ErrorColor,BackColor=Ui.Bg,Tag="error",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(20))};
+  Controls.Add(error);
+  y+=Ui.Px(20)+Ui.Px(14);
+  var ok=new ModernButton(okText,ButtonKind.Primary,null){Margin=new Padding(0)};
+  var cancel=new ModernButton("Abbrechen",ButtonKind.Secondary,null){Margin=new Padding(0)};
+  ok.Width=Math.Max(Ui.Px(110),ok.Width);cancel.Width=Math.Max(Ui.Px(110),cancel.Width);
+  ok.Location=new Point(width-pad-ok.Width,y);
+  cancel.Location=new Point(ok.Left-Ui.Px(10)-cancel.Width,y);
+  ok.Click+=(s,e)=>Accept();
+  cancel.Click+=(s,e)=>{DialogResult=DialogResult.Cancel;Close();};
+  Controls.Add(cancel);Controls.Add(ok);
+  AcceptButton=ok;CancelButton=cancel;
+  ClientSize=new Size(width,y+Ui.Px(38)+pad);
+  ActiveControl=box;
+  box.SelectAll();
+ }
+ void Accept() {
+  string message=validate!=null?validate(Value):null;
+  if(message!=null){error.Text=message;box.Focus();box.SelectAll();return;}
+  DialogResult=DialogResult.OK;
+  Close();
+ }
+ // Gibt den eingegebenen Text zurück oder null bei "Abbrechen".
+ public static string Ask(IWin32Window owner,string heading,string prompt,string initial,string okText,Func<string,string> validate) {
+  using(var dialog=new InputDialog(heading,prompt,initial,okText,validate)) {
+   dialog.StartPosition=owner!=null?FormStartPosition.CenterParent:FormStartPosition.CenterScreen;
+   var result=owner!=null?dialog.ShowDialog(owner):dialog.ShowDialog();
+   return result==DialogResult.OK?dialog.Value:null;
+  }
+ }
+}
+// Tooltip im Programmdesign (Globale Richtlinien, Weitere Fenster; Vorlage: Wake on LAN ab v1.61, ModernToolTip):
+// Kartenfarbe, 1 px Rand, Segoe UI 9 pt, Innenabstand 8 × 5, Umbruch bei 400, 15 s sichtbar.
+public class ModernToolTip:ToolTip {
+ static readonly Font TipFont=new Font("Segoe UI",9f);
+ // NoPadding: sonst legt Windows beim Messen links und rechts je 3–4 px dazu und der Rand wird größer als vorgegeben.
+ const TextFormatFlags Flags=TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding|TextFormatFlags.Left|TextFormatFlags.Top;
+ const int PadX=8,PadY=5;
+ public ModernToolTip() {
+  OwnerDraw=true;
+  AutoPopDelay=15000;
+  Popup+=(s,e)=>{
+   // Mit einem Graphics messen, genau wie gezeichnet wird (ohne Gerätekontext rechnet MeasureText einen Zuschlag ein).
+   float k;
+   Size size;
+   string text=GetToolTip(e.AssociatedControl)??"";
+   using(var g=Graphics.FromHwnd(IntPtr.Zero)) {
+    k=g.DpiX/96f;
+    size=TextRenderer.MeasureText(g,text,TipFont,new Size((int)(400*k),0),Flags);
+   }
+   // 1 px Reserve, damit beim Zeichnen nichts anders umbricht als beim Messen.
+   e.ToolTipSize=new Size(size.Width+1+2*(int)(PadX*k),size.Height+2*(int)(PadY*k));
+  };
+  Draw+=(s,e)=>{
+   float k=e.Graphics.DpiX/96f;
+   using(var back=new SolidBrush(Ui.Surface)) e.Graphics.FillRectangle(back,e.Bounds);
+   using(var pen=new Pen(Ui.Border)) e.Graphics.DrawRectangle(pen,0,0,e.Bounds.Width-1,e.Bounds.Height-1);
+   var r=new Rectangle((int)(PadX*k),(int)(PadY*k),e.Bounds.Width-2*(int)(PadX*k),e.Bounds.Height-2*(int)(PadY*k));
+   TextRenderer.DrawText(e.Graphics,e.ToolTipText,TipFont,r,Ui.TextColor,Flags);
+  };
+ }
+}
 }

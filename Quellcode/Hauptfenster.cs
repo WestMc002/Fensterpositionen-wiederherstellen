@@ -28,7 +28,7 @@ public class MainForm:Form {
  // Ausrichten: je eine Schaltfläche pro Kante und "Automatisch" (Regeln je Programm), Abstand frei wählbar.
  ModernButton alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules;
  readonly TextBox gapBox=new TextBox();
- readonly ToolTip alignTips=new ToolTip();
+ readonly ToolTip alignTips=new ModernToolTip();
  const int DefaultGap=18;
  TableLayoutPanel layout;
  readonly ContextMenuStrip rowMenu=new ContextMenuStrip();
@@ -62,6 +62,12 @@ public class MainForm:Form {
  Label viewTitle;
  Form view;
  Action<DialogResult> viewDone;
+ // Anordnungen (Store.Anordnungen): Auswahlfeld in der Aktionszeile, aktive Anordnung.
+ ModernButton arrangement;
+ readonly ContextMenuStrip arrangementMenu=new ContextMenuStrip();
+ string activeArrangement=Store.StandardName;
+ // Aufruf mit --wiederherstellen [Anordnung]: minimiert starten, wiederherstellen und bei Erfolg beenden.
+ public static bool AutoRestore;
  // Breite des Inhalts ohne Navigation (die Ausrichten-Zeile passt gerade hinein).
  int ContentWidth{get{return Ui.Px(1088);}}
  public MainForm() {
@@ -74,6 +80,7 @@ public class MainForm:Form {
   string migrated=DemoMode?null:Store.MigrateOldFolder();
   // Screenshots: ohne gespeicherte Einstellungen (Vorgaben, Abstand 18, Navigation angepinnt).
   Setup();profiles=DemoMode?new Dictionary<string,object>():Store.Load();
+  if(!DemoMode)activeArrangement=Store.ActiveName(Store.LoadRaw());
   builtIns.AddRange(entries);
   string skipped=null,hiddenNames=null;
   if(!DemoMode) {
@@ -145,7 +152,14 @@ public class MainForm:Form {
   var actions=new FlowLayoutPanel{Dock=DockStyle.Fill,Margin=new Padding(0,0,0,Ui.Px(14)),Padding=new Padding(0),BackColor=Ui.Bg,WrapContents=false};
   var alignLabel=new Label{Text="Ausrichten",AutoSize=true,Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
   alignLabel.Margin=new Padding(0,Math.Max(0,(Ui.Px(38)-alignLabel.PreferredHeight)/2),Ui.Px(10),0);
-  actions.Controls.AddRange(new Control[]{restore,save});
+  // Anordnung: eigene Positionen und Kanten je Anordnung (z.B. "Arbeit" und "Spielen"), Auswahl über ein Menü.
+  var arrangementLabel=new Label{Text="Anordnung",AutoSize=true,Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
+  arrangementLabel.Margin=new Padding(0,Math.Max(0,(Ui.Px(38)-arrangementLabel.PreferredHeight)/2),Ui.Px(10),0);
+  arrangement=new ModernButton(activeArrangement,ButtonKind.Secondary,null){DropDown=true,Margin=new Padding(0)};
+  arrangement.Click+=(s,e)=>ShowArrangementMenu();
+  arrangementMenu.Opened+=(s,e)=>MenuStyle.RoundCorners(arrangementMenu);
+  var arrangementSeparator=new ActionSeparator();
+  actions.Controls.AddRange(new Control[]{restore,save,arrangementSeparator,arrangementLabel,arrangement});
 
   // Zweite Zeile: Ausrichten an der sichtbaren Fensterkante mit frei wählbarem Abstand.
   var alignRow=new FlowLayoutPanel{Dock=DockStyle.Fill,Margin=new Padding(0,0,0,Ui.Px(14)),Padding=new Padding(0),BackColor=Ui.Bg,WrapContents=false};
@@ -178,6 +192,7 @@ public class MainForm:Form {
   alignTips.SetToolTip(alignHCenter,"Ausgewählte Fenster waagerecht mittig setzen (gleicher Abstand links und rechts)");
   alignTips.SetToolTip(alignVCenter,"Ausgewählte Fenster senkrecht mittig setzen (gleicher Abstand oben und unten)");
   alignTips.SetToolTip(alignAuto,"Alle angehakten Kanten aus „Kanten je Programm“ auf einmal ausrichten\r\n(Oben + Unten = volle Höhe, Links + Rechts = volle Breite, ↔/↕ Mitte = mittig)");
+  alignTips.SetToolTip(arrangement,"Anordnung wählen, neu anlegen, umbenennen oder löschen.\r\nJede Anordnung hat eigene Positionen und Kanten; eigene Programme gelten für alle.");
   alignTips.SetToolTip(gapBox,"Abstand der sichtbaren Fensterkante zum Rand in Bildschirmpixeln (Standard 18)");
 
   hint.Dock=DockStyle.Fill;hint.Margin=new Padding(0,0,0,Ui.Px(14));
@@ -252,13 +267,13 @@ public class MainForm:Form {
   alignVCenter.Click+=async(s,e)=>await AlignWindows("vcenter");
   alignAuto.Click+=async(s,e)=>await AlignWindows("auto");
   addProgram.Click+=(s,e)=>AddProgram();
-  FormClosing+=(s,e)=>{if(busy)e.Cancel=true;};
+  FormClosing+=(s,e)=>{if(busy||!ConfirmLeaveView())e.Cancel=true;};
   FormClosed+=(s,e)=>navTimer.Stop();
   ApplyTheme();
   Log(AppInfo.Product+" Version "+AppInfo.Version+" – Farbschema: "+(Ui.Dark?"dunkel":"hell")+", Akzentfarbe "+Ui.Hex(Ui.AccentBase));
   TraceLog.Cleanup(30);
   if(migrated!=null)Log(migrated);
-  Log("Positionen: "+Store.Display(Store.Profiles));
+  Log("Positionen: "+Store.Display(Store.Profiles)+(activeArrangement!=Store.StandardName?" – Anordnung „"+activeArrangement+"“":""));
   Log("Protokolldatei: "+Store.Display(TraceLog.Today));
   if(skipped!=null)Log("Nicht installiert (nicht angezeigt): "+skipped);
   if(hiddenNames!=null)Log("Ausgeblendet: "+hiddenNames+" – Rechtsklick in die Liste zeigt sie wieder an.");
@@ -268,7 +283,11 @@ public class MainForm:Form {
    else if(result!=null)Log("Update fehlgeschlagen: "+result.Replace("FEHLER","").Trim()+" – die bisherige Version läuft weiter.");
   }
   // Update-Prüfung still beim Start (höchstens einmal täglich, abschaltbar im Info-Fenster).
-  Shown+=async(s,e)=>await CheckForUpdates(false);
+  if(AutoRestore) {
+   // Per Verknüpfung: minimiert wiederherstellen; bei Erfolg beendet sich das Programm, sonst zeigt es das Protokoll.
+   WindowState=FormWindowState.Minimized;
+   Shown+=async(s,e)=>await RunAutoRestore();
+  } else Shown+=async(s,e)=>await CheckForUpdates(false);
   int customCount=entries.Count(x=>x.Custom);
   if(customCount>0)Log("Eigene Programme: "+customCount);
  }
@@ -300,7 +319,7 @@ public class MainForm:Form {
    else if(!(control is ModernButton))control.BackColor=inCard?Ui.Surface:Ui.Bg;
    if(control is Label) {
     string tag=control.Tag as string;
-    control.ForeColor=tag=="muted"?Ui.Muted:tag=="accent"?Ui.Accent:tag=="error"?Ui.ErrorColor:Ui.TextColor;
+    control.ForeColor=tag=="muted"?Ui.Muted:tag=="accent"?Ui.Accent:tag=="error"?Ui.ErrorColor:tag=="warning"?Ui.WarningColor:tag=="success"?Ui.SuccessColor:Ui.TextColor;
    }
    if(control is TextBox)control.ForeColor=Ui.TextColor;
    ApplyTheme(control,card);
@@ -325,7 +344,7 @@ public class MainForm:Form {
   alignTips.SetToolTip(navMenu,"Navigation aus- bzw. einklappen");
   navPin=AddNav("",'\uE718',()=>SetNavPinned(!NavPinned()));
   navPin.IconOnly=true;
-  navPrograms=AddNav("Programme",'\uE8FD',()=>{CloseNav();CloseView();});
+  navPrograms=AddNav("Programme",'\uE8FD',()=>{CloseNav();if(ConfirmLeaveView())CloseView();});
   navPrograms.Selected=true;
   navEdges=AddNav("Kanten je Programm",'\uE9A6',EditEdges);
   navOneTime=AddNav("Einmalig ausrichten",'\uE7C9',AlignOneWindow);
@@ -365,7 +384,7 @@ public class MainForm:Form {
    try {
     var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
     copy["_nav"]=new Dictionary<string,object>{{"pinned",pinned}};
-    Store.Write(Store.Profiles,copy);
+    Store.SaveProfiles(copy);
     profiles=copy;
    } catch(Exception ex) {Log("Navigation: Einstellung konnte nicht gespeichert werden – "+ex.Message);}
   }
@@ -463,6 +482,7 @@ public class MainForm:Form {
   if(title==null)title=item.Text;
   CloseNav();
   if(view!=null&&viewTitle.Tag==item&&viewTitle.Text==title){f.Dispose();return;} // schon offen
+  if(!ConfirmLeaveView()){f.Dispose();return;}
   CloseView();
   var size=f.ClientSize;
   f.TopLevel=false;
@@ -492,6 +512,13 @@ public class MainForm:Form {
   nav.BringToFront();
   f.Show();
   f.Focus();
+ }
+ // Ungespeicherte Änderungen auf einer Einstellungsseite: vor dem Verlassen (Navigation, Fenster schließen)
+ // nachfragen. Vorauswahl "Nein" = auf der Seite bleiben. "Abbrechen" auf der Seite verwirft ohne Rückfrage.
+ bool ConfirmLeaveView() {
+  var page=view as AlignRulesForm;
+  if(page==null||!page.HasChanges)return true;
+  return MessageBox.Show(this,"Die Änderungen auf der Seite „"+viewTitle.Text+"“ sind noch nicht gespeichert.\r\n\r\nÄnderungen verwerfen?","Nicht gespeichert",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)==DialogResult.Yes;
  }
  static IEnumerable<Button> AllButtons(Control c) {
   foreach(Control child in c.Controls) {
@@ -578,7 +605,7 @@ public class MainForm:Form {
    if(settings==null){settings=new Dictionary<string,object>();copy["_update"]=settings;}
    if(auto.HasValue)settings["auto"]=auto.Value;
    if(last.HasValue)settings["last"]=last.Value.ToString("o",System.Globalization.CultureInfo.InvariantCulture);
-   Store.Write(Store.Profiles,copy);
+   Store.SaveProfiles(copy);
    profiles=copy;
   } catch(Exception ex) {Log("Update-Einstellung konnte nicht gespeichert werden: "+ex.Message);}
  }
@@ -754,6 +781,11 @@ public class MainForm:Form {
  // Screenshots: Seiten "Kanten je Programm" und "Programm hinzufügen" im Hauptfenster.
  internal void DemoShowEdges(){EditEdges();}
  internal void DemoShowAdd(){AddProgram();}
+ internal void DemoShowOneTime() {
+  AlignOneWindow();
+  var page=view as OneTimeAlignForm;
+  if(page!=null)page.DemoFill();
+ }
  void UpdateSelection() {
   int count=list.Rows.Count(x=>x.Checked);
   selectionInfo.Text=count+" von "+list.Rows.Count+" ausgewählt";
@@ -761,7 +793,7 @@ public class MainForm:Form {
  }
  void SetBusy(bool on) {
   busy=on;list.Enabled=!on;
-  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules,admin,addProgram,navEdges,navOneTime})if(button!=null)button.Enabled=!on;
+  foreach(var button in new Button[]{restore,save,all,alignTop,alignBottom,alignLeft,alignRight,alignHCenter,alignVCenter,alignAuto,alignRules,admin,addProgram,navEdges,navOneTime,arrangement})if(button!=null)button.Enabled=!on;
   activity.Active=on;
  }
  static string Quote(string s){return "\""+s+"\"";}
@@ -817,7 +849,7 @@ public class MainForm:Form {
   try {
    var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
    copy["_gap"]=gap;
-   Store.Write(Store.Profiles,copy);
+   Store.SaveProfiles(copy);
    profiles=copy;
   } catch(Exception ex) {Log("Abstand konnte nicht gespeichert werden: "+ex.Message);}
  }
@@ -935,7 +967,7 @@ public class MainForm:Form {
   if(busy)return;
   var page=new OneTimeAlignForm(Icon,()=>CurrentGap(),Log);
   ShowView(navOneTime,page,null,null);
-  if(view==page)BeginInvoke((Action)page.Begin);
+  if(view==page&&!DemoMode)BeginInvoke((Action)page.Begin);
  }
  void EditEdges() {
   if(busy)return;
@@ -945,7 +977,7 @@ public class MainForm:Form {
   foreach(var e in entries){current[e.Id]=EdgesFor(e.Id);currentGaps[e.Id]=GapsFor(e.Id);currentRefs[e.Id]=RefsFor(e.Id);}
   var page=new AlignRulesForm(Icon,entries,current,currentGaps,currentRefs,CurrentGap());
   // Gespeichert wird erst mit "Speichern"; schlägt das fehl, bleibt die Seite mit der Fehlermeldung offen.
-  // Danach zurück zu "Programme", die Meldung steht im Protokoll.
+  // Danach bleibt die Seite offen und zeigt kurz grün "Gespeichert"; die Einzelheiten stehen im Protokoll.
   page.Save=()=>SaveEdges(page.Rules,page.Gaps,page.Refs);
   ShowView(navEdges,page,null,null);
  }
@@ -967,7 +999,7 @@ public class MainForm:Form {
    else savedRefs[pair.Key]=pair.Value.ToDictionary(x=>x.Key,x=>(object)x.Value);
   }
   copy.Remove("_skip");
-  try {Store.Write(Store.Profiles,copy);}
+  try {Store.SaveProfiles(copy);}
   catch(Exception ex) {return "Nicht gespeichert: "+ex.Message;}
   profiles=copy;
   var lines=new List<string>();
@@ -1071,7 +1103,7 @@ public class MainForm:Form {
   } catch(Exception ex) {note=ex.Message;}
   var updated=new List<Entry>(entries);updated.Add(entry);
   Store.SetCustomEntries(copy,updated);
-  try {Store.Write(Store.Profiles,copy);}
+  try {Store.SaveProfiles(copy);}
   catch(Exception ex) {Log(entry.Name+": konnte nicht gespeichert werden – "+ex.Message);return;}
   profiles=copy;
   entries.Add(entry);
@@ -1130,7 +1162,7 @@ public class MainForm:Form {
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   var ids=Store.HiddenIds(copy);ids.Add(entry.Id);
   Store.SetHiddenIds(copy,ids);
-  try {Store.Write(Store.Profiles,copy);}
+  try {Store.SaveProfiles(copy);}
   catch(Exception ex) {Log(entry.Name+": konnte nicht ausgeblendet werden – "+ex.Message);return;}
   profiles=copy;
   entries.Remove(entry);
@@ -1147,7 +1179,7 @@ public class MainForm:Form {
   var ids=Store.HiddenIds(copy);
   foreach(var e in back)ids.Remove(e.Id);
   Store.SetHiddenIds(copy,ids);
-  try {Store.Write(Store.Profiles,copy);}
+  try {Store.SaveProfiles(copy);}
   catch(Exception ex) {Log("Ausgeblendete Programme konnten nicht angezeigt werden – "+ex.Message);return;}
   profiles=copy;
   foreach(var e in back) {
@@ -1172,7 +1204,7 @@ public class MainForm:Form {
    if(rules!=null)rules.Remove(entry.Id);
   }
   Store.SetCustomEntries(copy,entries.Where(x=>x!=entry));
-  try {Store.Write(Store.Profiles,copy);}
+  try {Store.SaveProfiles(copy);}
   catch(Exception ex) {Log(entry.Name+": konnte nicht entfernt werden – "+ex.Message);return;}
   profiles=copy;
   entries.Remove(entry);
@@ -1273,13 +1305,15 @@ public class MainForm:Form {
   }
   throw new Exception("Programm gestartet; Ausrichtung nach Start nicht bestaetigt: "+(lastError??(success?"Startphase nicht abgeschlossen.":"Fenster nicht bereit.")));
  }
- async Task Run(bool capture) {
+ // Gibt die Zahl der Fehler zurück (-1 = nichts ausgewählt).
+ async Task<int> Run(bool capture) {
   // Nachbarprogramme zuerst bearbeiten, damit sich andere an ihrer neuen Lage ausrichten.
   var selected=OrderByNeighbors(list.Rows.Where(x=>x.Checked).ToList());
-  if(selected.Count==0){MessageBox.Show(this,"Bitte mindestens ein Programm auswählen.");return;}
+  if(selected.Count==0){MessageBox.Show(this,"Bitte mindestens ein Programm auswählen.",AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Information);return -1;}
   // Der eingestellte Abstand gilt auch für das Ausrichten nach dem Wiederherstellen.
   int gap=CurrentGap();
   SaveGap();
+  SaveSelection(selected);
   SetBusy(true);
   int failures=0;
   try {
@@ -1295,7 +1329,7 @@ public class MainForm:Form {
        // Fenster direkt messen bzw. verschieben; das Programm wird dafür nicht beendet.
        if(capture) {
         profileCopy[entry.Id]=new Dictionary<string,object>{{"Window",VisibleAlignment.CaptureWindow(entry)}};
-        Store.Write(Store.Profiles,profileCopy);profiles=profileCopy;
+        Store.SaveProfiles(profileCopy);profiles=profileCopy;
        } else {
         var saved=(Dictionary<string,object>)profileCopy[entry.Id];
         // z.B. TeamSpeak 3 bis 2.30: dort war statt der Fensterposition die ganze Datenbank gesichert.
@@ -1324,7 +1358,7 @@ public class MainForm:Form {
       try {
        if(capture) profileCopy[entry.Id]=Store.Capture(entry);
        else Store.Restore(entry,(Dictionary<string,object>)profileCopy[entry.Id]);
-       if(capture) {Store.Write(Store.Profiles,profileCopy);profiles=profileCopy;}
+       if(capture) {Store.SaveProfiles(profileCopy);profiles=profileCopy;}
       } finally {if(capture && running)Start(entry);}
       if(!capture)Start(entry,true);
      });
@@ -1335,6 +1369,172 @@ public class MainForm:Form {
    }
    Log("Fertig. "+(selected.Count-failures)+" erfolgreich, "+failures+" Fehler.");
   } finally {SetBusy(false);}
+  return failures;
+ }
+ // Zuletzt bei "Wiederherstellen" bzw. "Positionen speichern" angehakte Programme (je Anordnung, "_auswahl"):
+ // Diese stellt der Aufruf per Verknüpfung wieder her.
+ void SaveSelection(IEnumerable<ProgramRow> rows) {
+  if(DemoMode)return;
+  try {
+   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+   copy["_auswahl"]=rows.Select(x=>(object)x.Entry.Id).ToList();
+   Store.SaveProfiles(copy);
+   profiles=copy;
+  } catch(Exception ex) {Log("Auswahl konnte nicht gespeichert werden: "+ex.Message);}
+ }
+ HashSet<string> AutoSelection() {
+  var ids=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  var saved=profiles.ContainsKey("_auswahl")?profiles["_auswahl"] as System.Collections.IEnumerable:null;
+  if(saved!=null&&!(saved is string))foreach(object id in saved)if(id!=null)ids.Add(Convert.ToString(id));
+  // Ohne gespeicherte Auswahl: alle Programme mit gespeicherter Position.
+  if(ids.Count==0)foreach(var e in entries)if(profiles.ContainsKey(e.Id))ids.Add(e.Id);
+  ids.RemoveWhere(id=>!profiles.ContainsKey(id));
+  return ids;
+ }
+ // ================================================================== Wiederherstellen per Verknüpfung
+ async Task RunAutoRestore() {
+  bool problem=false;
+  string known=null;
+  try {known=Store.Override==null?null:Store.FindArrangement(Store.LoadRaw(),Store.Override);} catch {}
+  if(Store.Override!=null&&known==null) {
+   Log("Die Anordnung „"+Store.Override+"“ gibt es nicht – es gilt „"+activeArrangement+"“.");
+   problem=true;
+  }
+  var ids=AutoSelection();
+  foreach(var row in list.Rows)row.Checked=ids.Contains(row.Entry.Id);
+  UpdateSelection();
+  if(ids.Count==0) {
+   Log("In der Anordnung „"+activeArrangement+"“ sind keine Positionen gespeichert – nichts wiederhergestellt.");
+   ShowAfterAutoRestore();
+   return;
+  }
+  Log("Wiederherstellen per Verknüpfung – Anordnung „"+activeArrangement+"“.");
+  int failures=await Run(false);
+  if(failures==0&&!problem) {
+   await Task.Delay(1500);
+   Close();
+  } else ShowAfterAutoRestore();
+ }
+ // Bei Fehlern das Fenster zeigen, damit das Protokoll sichtbar ist.
+ void ShowAfterAutoRestore() {
+  WindowState=FormWindowState.Normal;
+  Activate();
+ }
+ // ================================================================== Anordnungen
+ void ShowArrangementMenu() {
+  if(busy)return;
+  List<string> names;
+  try {names=DemoMode?new List<string>{Store.StandardName,"Spielen"}:Store.ArrangementNames(Store.LoadRaw());}
+  catch(Exception ex) {Log("Anordnungen konnten nicht gelesen werden: "+ex.Message);return;}
+  MenuStyle.Prepare(arrangementMenu);
+  arrangementMenu.Items.Add(MenuStyle.TopSpacer());
+  foreach(string n in names) {
+   string name=n;
+   arrangementMenu.Items.Add(MenuStyle.Item(name,name==activeArrangement?'\uE73E':'\0',(s,a)=>SwitchArrangement(name)));
+  }
+  arrangementMenu.Items.Add(new ToolStripSeparator());
+  arrangementMenu.Items.Add(MenuStyle.Item("Neue Anordnung …",'\uE710',(s,a)=>BeginInvoke((Action)NewArrangement)));
+  bool own=activeArrangement!=Store.StandardName;
+  var rename=MenuStyle.Item("Umbenennen …",'\uE8AC',(s,a)=>BeginInvoke((Action)RenameArrangement));
+  rename.Enabled=own;
+  arrangementMenu.Items.Add(rename);
+  var delete=MenuStyle.Item("Löschen …",'\uE74D',(s,a)=>BeginInvoke((Action)DeleteArrangement));
+  delete.Enabled=own;
+  arrangementMenu.Items.Add(delete);
+  arrangementMenu.Items.Add(new ToolStripSeparator());
+  arrangementMenu.Items.Add(MenuStyle.Item("Verknüpfung auf dem Desktop anlegen",'\uE71B',(s,a)=>CreateShortcut()));
+  arrangementMenu.Items.Add(MenuStyle.BottomSpacer());
+  arrangementMenu.Show(arrangement,new Point(0,arrangement.Height));
+ }
+ // Nach jeder Änderung: Sicht der aktiven Anordnung neu laden (Positionen, Kanten, Abstand).
+ void ReloadArrangement() {
+  try {
+   var raw=Store.LoadRaw();
+   activeArrangement=Store.ActiveName(raw);
+   profiles=Store.Load();
+  } catch(Exception ex) {Log("Anordnung konnte nicht geladen werden: "+ex.Message);return;}
+  arrangement.Text=activeArrangement;
+  gapBox.Text=SavedGap().ToString();
+  foreach(var row in list.Rows)row.Status="Bereit";
+ }
+ void SwitchArrangement(string name) {
+  if(busy||DemoMode||name==activeArrangement)return;
+  SaveGap();
+  Store.Override=null;
+  try {Store.SetActiveArrangement(name);}
+  catch(Exception ex) {Log("Anordnung konnte nicht gewechselt werden: "+ex.Message);return;}
+  ReloadArrangement();
+  Log("Anordnung „"+activeArrangement+"“ aktiv.");
+ }
+ // Namen prüfen: nicht leer, keine Zeichen, die in Dateinamen (Verknüpfung) verboten sind, nicht doppelt.
+ Func<string,string> ArrangementNameCheck(string current) {
+  return text=>{
+   if(text.Length==0)return "Bitte einen Namen eingeben.";
+   if(text.IndexOfAny("\"\\/:*?<>|".ToCharArray())>=0)return "Bitte ohne die Zeichen \" \\ / : * ? < > |";
+   if(text.StartsWith("_")||text.StartsWith("-"))return "Der Name darf nicht mit _ oder - beginnen.";
+   string found;
+   try {found=Store.FindArrangement(Store.LoadRaw(),text);} catch(Exception ex) {return ex.Message;}
+   if(found!=null&&found!=current)return "„"+found+"“ gibt es schon.";
+   return null;
+  };
+ }
+ void NewArrangement() {
+  if(busy||DemoMode)return;
+  string source=activeArrangement;
+  string name=InputDialog.Ask(this,"Neue Anordnung","Sie übernimmt Positionen und Kanten von „"+source+"“. Danach die Fenster anordnen und „Positionen speichern“ anklicken.","","Anlegen",ArrangementNameCheck(null));
+  if(name==null)return;
+  SaveGap();
+  Store.Override=null;
+  try {Store.CreateArrangement(name,profiles);}
+  catch(Exception ex) {Log("Anordnung konnte nicht angelegt werden: "+ex.Message);return;}
+  ReloadArrangement();
+  Log("Neue Anordnung „"+name+"“ angelegt (Kopie von „"+source+"“) und aktiv.");
+ }
+ void RenameArrangement() {
+  string old=activeArrangement;
+  if(busy||DemoMode||old==Store.StandardName)return;
+  string name=InputDialog.Ask(this,"Anordnung umbenennen",null,old,"Umbenennen",ArrangementNameCheck(old));
+  if(name==null||name==old)return;
+  Store.Override=null;
+  try {Store.RenameArrangement(old,name);}
+  catch(Exception ex) {Log("Anordnung konnte nicht umbenannt werden: "+ex.Message);return;}
+  ReloadArrangement();
+  Log("Anordnung „"+old+"“ heißt jetzt „"+name+"“. Verknüpfungen mit dem alten Namen bitte neu anlegen.");
+ }
+ void DeleteArrangement() {
+  string name=activeArrangement;
+  if(busy||DemoMode||name==Store.StandardName)return;
+  if(MessageBox.Show(this,"Die gespeicherten Positionen und Kanten dieser Anordnung werden gelöscht; die Fenster selbst bleiben, wie sie sind. Danach ist „"+Store.StandardName+"“ aktiv.\r\n\r\nAnordnung „"+name+"“ löschen?","Anordnung löschen",MessageBoxButtons.YesNo,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+  Store.Override=null;
+  try {Store.DeleteArrangement(name);}
+  catch(Exception ex) {Log("Anordnung konnte nicht gelöscht werden: "+ex.Message);return;}
+  ReloadArrangement();
+  Log("Anordnung „"+name+"“ gelöscht – „"+activeArrangement+"“ ist aktiv.");
+ }
+ // Verknüpfung, die die aktive Anordnung ohne Programmfenster wiederherstellt (z.B. für den Autostart-Ordner).
+ void CreateShortcut() {
+  string name=activeArrangement;
+  string title="Fenster wiederherstellen"+(name==Store.StandardName?"":" ("+name+")");
+  string path=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),title+".lnk");
+  object shell=null,link=null;
+  try {
+   Type type=Type.GetTypeFromProgID("WScript.Shell");
+   shell=Activator.CreateInstance(type);
+   link=type.InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{path});
+   Type linkType=link.GetType();
+   linkType.InvokeMember("TargetPath",BindingFlags.SetProperty,null,link,new object[]{Application.ExecutablePath});
+   linkType.InvokeMember("Arguments",BindingFlags.SetProperty,null,link,new object[]{"--wiederherstellen"+(name==Store.StandardName?"":" "+Quote(name))});
+   linkType.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,link,new object[]{Path.GetDirectoryName(Application.ExecutablePath)});
+   linkType.InvokeMember("IconLocation",BindingFlags.SetProperty,null,link,new object[]{Application.ExecutablePath+",0"});
+   linkType.InvokeMember("Description",BindingFlags.SetProperty,null,link,new object[]{"Gespeicherte Fensterpositionen wiederherstellen (Anordnung "+name+")"});
+   linkType.InvokeMember("Save",BindingFlags.InvokeMethod,null,link,null);
+   Log("Verknüpfung „"+title+"“ auf dem Desktop angelegt: Sie stellt die Anordnung „"+name+"“ wieder her, ohne das Programmfenster zu öffnen.");
+  } catch(Exception ex) {
+   MessageBox.Show(this,"Die Verknüpfung konnte nicht angelegt werden: "+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);
+  } finally {
+   if(link!=null)Marshal.FinalReleaseComObject(link);
+   if(shell!=null)Marshal.FinalReleaseComObject(shell);
+  }
  }
 }
 }

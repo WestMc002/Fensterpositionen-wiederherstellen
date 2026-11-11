@@ -45,6 +45,7 @@ static class Demo {
      Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoRun(),Path.Combine(outDir,"ablauf-"+suffix+".png"));
      Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoShowEdges(),Path.Combine(outDir,"kanten-"+suffix+".png"));
      Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoShowAdd(),Path.Combine(outDir,"hinzufuegen-"+suffix+".png"));
+     Shot(backdrop,()=>new MainForm(),f=>((MainForm)f).DemoShowOneTime(),Path.Combine(outDir,"einmalig-"+suffix+".png"));
      Shot(backdrop,()=>new AboutForm(MainForm.LoadSignature(),icon,null,DemoUpdates()),null,Path.Combine(outDir,"info-"+suffix+".png"));
     }
    }

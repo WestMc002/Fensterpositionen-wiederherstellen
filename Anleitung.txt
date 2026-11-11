@@ -1,6 +1,6 @@
 ﻿FENSTERPOSITIONEN
 ================
-Version 2.47 (Build-Datum wird angehängt, z.B. 2.47.2026.1109)
+Version 2.49 (Build-Datum wird angehängt, z.B. 2.49.2026.1111)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -14,7 +14,8 @@ Links im Fenster steht die Navigation:
 - Programme: Startseite mit Programmliste, Wiederherstellen, Positionen
   speichern, Ausrichten und Protokoll.
 - Kanten je Programm: Einstellungsseite für die Kanten (siehe unten).
-- Einmalig ausrichten: beliebiges offenes Fenster anklicken und ausrichten.
+- Einmalig ausrichten: beliebiges offenes Fenster anklicken oder aus der
+  Liste wählen und ausrichten.
 - Einstellungen (unten, Zahnrad): Menü mit "Sicherungen öffnen",
   "Protokolle öffnen", "Anleitung öffnen", "Ausgeblendete wieder anzeigen"
   und "Info über Fensterpositionen".
@@ -22,8 +23,44 @@ Links im Fenster steht die Navigation:
 sie an: angepinnt bleibt sie offen und schiebt den Inhalt (Standard), sonst
 klappt sie über dem Inhalt aus und nach einer Auswahl wieder ein. Die Wahl
 wird in Positionen.json gespeichert (_nav).
-Wechselt man über die Navigation zu einer anderen Seite, gilt das wie
-"Abbrechen": nicht gespeicherte Änderungen werden verworfen.
+Wechselt man über die Navigation zu einer anderen Seite oder schließt das
+Fenster, während "Kanten je Programm" ungespeicherte Änderungen hat, fragt
+das Programm "Änderungen verwerfen?" ("Nein" ist vorausgewählt und bleibt auf
+der Seite). "Abbrechen" auf der Seite verwirft ohne Rückfrage.
+
+Anordnungen
+-----------
+Rechts neben "Positionen speichern" steht die aktive Anordnung (Standard:
+"Standard"). Jede Anordnung hat eigene gespeicherte Positionen, eigene Kanten
+je Programm und einen eigenen Abstand, z.B. "Arbeit" und "Spielen".
+Eigene Programme, ausgeblendete Programme, Navigation und Update-Einstellungen
+gelten für alle Anordnungen.
+Das Menü der Anordnung bietet:
+- die Anordnungen zum Umschalten (Haken = aktiv),
+- "Neue Anordnung …": übernimmt Positionen und Kanten der aktiven Anordnung;
+  danach die Fenster anordnen und "Positionen speichern" anklicken,
+- "Umbenennen …" und "Löschen …" (nicht bei "Standard"; beim Löschen wird
+  nachgefragt, die Fenster selbst bleiben, wie sie sind),
+- "Verknüpfung auf dem Desktop anlegen" (siehe unten).
+Gespeichert in Positionen.json: die Werte von "Standard" wie bisher direkt,
+weitere Anordnungen unter _anordnungen, die aktive unter _anordnung.
+
+Wiederherstellen per Verknüpfung (ohne Fenster)
+-----------------------------------------------
+Menü der Anordnung > "Verknüpfung auf dem Desktop anlegen" legt
+"Fenster wiederherstellen.lnk" bzw. "Fenster wiederherstellen (<Anordnung>).lnk"
+auf dem Desktop an. Ein Doppelklick startet Fensterpositionen minimiert,
+stellt die Anordnung wieder her und beendet sich nach 1,5 Sekunden, wenn
+alles geklappt hat. Bei Fehlern öffnet sich das Fenster mit dem Protokoll.
+Wiederhergestellt werden die Programme, die zuletzt bei "Wiederherstellen"
+oder "Positionen speichern" angehakt waren (je Anordnung, _auswahl); ohne
+solche Auswahl alle mit gespeicherter Position.
+Aufruf von Hand: "Fensterpositionen wiederherstellen.exe" --wiederherstellen
+["Name der Anordnung"]. Ohne Namen gilt die aktive Anordnung; die aktive
+Anordnung wird dadurch nicht umgestellt.
+Die Verknüpfung lässt sich z.B. in den Autostart-Ordner verschieben
+(Win+R, shell:startup). Nach dem Umbenennen einer Anordnung die Verknüpfung
+neu anlegen.
 
 Wiederherstellen
 Programme auswählen und "Wiederherstellen" anklicken.
@@ -138,8 +175,8 @@ Design            nur Entwürfe und Bilder, vom Programm nicht gebraucht:
   Vorschau          frühere Vorschaubilder (werden nicht mehr erzeugt)
 Backup            Sicherung des ganzen Projekts je Version
 Screenshots       Bilder für GitHub (README.md), paarweise hell/dunkel:
-                  hell/dunkel (Hauptfenster), ablauf-, kanten-, hinzufuegen-
-                  und info-;
+                  hell/dunkel (Hauptfenster), ablauf-, kanten-, hinzufuegen-,
+                  einmalig- und info-;
                   erzeugt das Programm auf Nachfrage beim Erstellen
 Im Projektordner selbst liegen nur Erstellen.bat, die EXE, Anleitung.txt,
 README.md, .gitignore und die Ordner (Erstellen.log entsteht beim Erstellen).
@@ -207,6 +244,10 @@ rechts neben Discord, auch wenn Discord breiter oder schmaler wird.
   (Hinweis im Protokoll).
 - Das Fenster muss trotzdem ganz in den Arbeitsbereich passen.
 Gespeichert in Positionen.json (_edgerefs).
+Beziehen sich Programme gegenseitig (z.B. Task-Manager links an TeamSpeak 3
+und TeamSpeak 3 rechts an Task-Manager) oder im Kreis, werden diese Bezüge
+orange markiert und die Statuszeile nennt sie. Das funktioniert, beim
+Ausrichten zählt dann aber die Lage, die das andere Fenster gerade hat.
 Vorgabe ("Standard", wie bis Version 2.23):
   Task-Manager   Unten, Rechts
   DU Meter       Oben, Rechts
@@ -219,9 +260,11 @@ Vorgabe ("Standard", wie bis Version 2.23):
   eigene         keine Vorgabe (frei wählbar)
 Übernommen wird erst mit "Speichern", "Abbrechen" (Esc) verwirft alle
 Änderungen. Ungültige Werte (z.B. mehr als 5000 px) meldet eine rote Zeile
-links neben den Knöpfen; die Seite bleibt dann offen. Die Knöpfe stehen
+links neben den Knöpfen; die Seite bleibt dann offen. Hinweise (Messen,
+Standard, gegenseitige Bezüge) stehen grau neben "Standard". Die Knöpfe stehen
 wie üblich: "Abbrechen" links, "Speichern" ganz rechts. Nach dem Speichern
-geht es zurück zu "Programme", die Meldung steht im Protokoll.
+bleibt die Seite offen und zeigt 4 Sekunden lang grün "Gespeichert"; die
+Einzelheiten stehen im Protokoll.
 Gespeichert wird in Positionen.json (_edges, eigene Abstände in _edgegaps).
 Ist bei einem Programm keine Kante angehakt (Vorgabe bei eigenen Programmen),
 wird es nicht ausgerichtet und zeigt "Keine Kanten festgelegt".
@@ -229,13 +272,17 @@ wird es nicht ausgerichtet und zeigt "Keine Kanten festgelegt".
 Einmalig ausrichten: Die Seite "Einmalig ausrichten" (Navigation links)
 richtet ein beliebiges offenes Fenster aus, ohne es in die Liste aufzunehmen.
 1. "Einmalig ausrichten" anklicken; die Seite wartet sofort auf die Auswahl.
-2. Auf das gewünschte Fenster klicken (Esc bricht ab). Titel und Programm
+2. Auf das gewünschte Fenster klicken (Esc bricht ab) oder es links unten in
+   der Liste "Offene Fenster" wählen – praktisch, wenn es vom Programmfenster
+   verdeckt ist ("Aktualisieren" lädt die Liste neu). Titel und Programm
    erscheinen auf der Seite, Fensterpositionen kommt wieder nach vorn;
    "Fenster anklicken" wählt ein anderes.
 3. Oben, Unten, Links, Rechts, ↔ Mitte oder ↕ Mitte anklicken. Mehrere
    Richtungen nacheinander ergänzen sich (z.B. "Unten" und "↔ Mitte").
 Es gilt der eingestellte Abstand. Nichts wird gespeichert: keine Position,
-keine Regel und keine Nachkorrektur beim Start. Ergebnis im Protokoll.
+keine Regel und keine Nachkorrektur beim Start. Das Ergebnis steht rechts
+unten unter "Zuletzt ausgerichtet" (bis zum Beenden, neueste oben) und im
+Protokoll.
 Fenster von Programmen mit Administratorrechten lassen sich nur verschieben,
 wenn dieses Programm ebenfalls als Administrator läuft.
 Minimierte oder maximierte Fenster müssen zuerst normal geöffnet werden.
@@ -399,8 +446,8 @@ Administrator-Hinweis und mit %LOCALAPPDATA% statt des Benutzerordners. Auch
 das Protokoll zeigt Pfade so an. Erzeugt werden je hell und dunkel:
 Hauptfenster, ein Demo-Ablauf (eigenes Programm hinzugefügt, Fenster
 ausgerichtet), die Seite "Kanten je Programm" mit den Vorgaben, die Seite
-"Programm hinzufügen" mit einer festen Demo-Liste statt der offenen Fenster
-und das Info-Fenster. Fehler stehen in
+"Programm hinzufügen" und die Seite "Einmalig ausrichten" mit festen
+Demo-Listen statt der offenen Fenster und das Info-Fenster. Fehler stehen in
 Screenshots\Fehler.txt (wird nicht hochgeladen).
 Downloads (Releases) baut GitHub automatisch als ZIP mit der EXE und dieser
 Anleitung; die Release-Seite zeigt oben die Änderungen der Version.
@@ -477,6 +524,19 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.48 bis 2.49  Mehrere Anordnungen (z.B. "Arbeit" und "Spielen") mit eigenen
+               Positionen und Kanten, umschaltbar neben "Positionen speichern".
+               Verknüpfung "Fenster wiederherstellen" auf dem Desktop: stellt
+               eine Anordnung minimiert wieder her und beendet sich bei Erfolg
+               (--wiederherstellen).
+               Einmalig ausrichten: Liste der offenen Fenster zum Auswählen und
+               Liste "Zuletzt ausgerichtet".
+               Kanten je Programm: Rückfrage "Änderungen verwerfen?" beim
+               Verlassen mit ungespeicherten Änderungen; gegenseitige
+               Nachbarbezüge werden orange markiert; mehr Abstand unter der
+               Beschreibung, Statuszeile neben "Standard"; "Speichern" bleibt
+               auf der Seite und meldet kurz grün "Gespeichert".
+               Tooltips im Programmdesign (hell/dunkel, 15 Sekunden sichtbar).
 2.47           Die Seiten nutzen die volle Breite und Höhe des Fensters: Bei
                "Kanten je Programm" wachsen die Spalten mit, die Tabelle füllt die
                Höhe; bei "Programm hinzufügen" wächst die Fensterliste mit.

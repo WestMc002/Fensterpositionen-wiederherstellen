@@ -313,7 +313,7 @@ public class AddProgramForm:FixedSizeForm {
  }
 }
 
-// Seite "Einmalig ausrichten" (im Hauptfenster eingebettet): ein beliebiges offenes Fenster anklicken und ausrichten,
+// Seite "Einmalig ausrichten" (im Hauptfenster eingebettet): ein beliebiges offenes Fenster anklicken bzw. in der Liste wählen und ausrichten,
 // ohne es in die Liste aufzunehmen. Es wird nichts gespeichert (keine Regel, keine Nachkorrektur).
 public class OneTimeAlignForm:FixedSizeForm {
  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
@@ -325,61 +325,116 @@ public class OneTimeAlignForm:FixedSizeForm {
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int max);
  // Desktop, Taskleiste, Startmenü und Infobereich zählen nicht als Fenster.
  static readonly string[] IgnoredClasses={"Progman","WorkerW","Shell_TrayWnd","Shell_SecondaryTrayWnd","Windows.UI.Core.CoreWindow","NotifyIconOverflowWindow","TopLevelWindowForOverflowXamlIsland","XamlExplorerHostIslandWindow"};
+ // Offenes Fenster in der Liste.
+ class WindowItem {public IntPtr Handle;public string Title,Process;}
+ // Ergebnis einer Ausrichtung (bleibt bis zum Programmende erhalten, neueste oben).
+ class Result {public DateTime Time;public string Title,Text;public bool Failed;}
+ static readonly List<Result> recent=new List<Result>();
  readonly Func<int> gap;
  readonly Action<string> log;
- readonly Label windowTitle,windowDetail,status;
- readonly ModernButton pick;
+ readonly Label intro,windowTitle,windowDetail,status,listTitle,recentTitle,recentEmpty;
+ readonly Card card,listCard,recentCard;
+ readonly ModernButton pick,refresh;
+ readonly ListBox windows=new ListBox(),results=new ListBox();
  readonly List<ModernButton> directions=new List<ModernButton>();
  readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=150};
  readonly uint ownProcess=(uint)Process.GetCurrentProcess().Id;
  IntPtr target=IntPtr.Zero;
  string targetName="";
- bool picking,working;
+ bool picking,working,loading,demo;
  public OneTimeAlignForm(Icon icon,Func<int> gap,Action<string> log) {
   this.gap=gap;this.log=log;
   Text="Einmalig ausrichten";
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
   KeyPreview=true;
-  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(4),inner=w-2*pad;
-  var intro=new Label{Text="Ein beliebiges offenes Fenster anklicken und ausrichten. Es wird nicht in die Liste aufgenommen und nichts gespeichert.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
+  int w=Ui.Px(760);
+  intro=new Label{Text="Ein beliebiges offenes Fenster anklicken oder unten in der Liste wählen, dann die Richtung anklicken. Es wird nicht in die Liste der Programme aufgenommen und nichts gespeichert.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
   Controls.Add(intro);
-  y+=Ui.Px(48);
-  var card=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(64))};
-  pick=new ModernButton("Fenster anklicken",ButtonKind.Primary,"\uE7C9");
-  pick.Location=new Point(card.Width-Ui.Px(13)-pick.Width,(card.Height-pick.Height)/2);
+  card=new Card{Size=new Size(Ui.Px(600),Ui.Px(64))};
+  pick=new ModernButton("Fenster anklicken",ButtonKind.Primary,"");
   pick.Click+=(s,e)=>StartPick();
-  int textWidth=pick.Left-Ui.Px(28);
-  windowTitle=new Label{Text="Noch kein Fenster gewählt",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(Ui.Px(16),Ui.Px(10),textWidth,Ui.Px(22))};
-  windowDetail=new Label{Text="„Fenster anklicken“ und danach auf das gewünschte Fenster klicken",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(Ui.Px(16),Ui.Px(33),textWidth,Ui.Px(20))};
+  windowTitle=new Label{Text="Noch kein Fenster gewählt",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false};
+  windowDetail=new Label{Text="„Fenster anklicken“ und danach auf das gewünschte Fenster klicken – oder unten in der Liste wählen",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",AutoEllipsis=true,UseMnemonic=false};
   card.Controls.Add(windowTitle);card.Controls.Add(windowDetail);card.Controls.Add(pick);
+  card.Resize+=(s,e)=>LayoutCard();
   Controls.Add(card);
-  y+=card.Height+Ui.Px(16);
   string[] modes={"top","bottom","left","right","hcenter","vcenter"};
   string[] names={"Oben","Unten","Links","Rechts","↔ Mitte","↕ Mitte"};
-  string[] glyphs={"\uE74A","\uE74B","\uE72B","\uE72A",null,null};
-  int x=pad;
+  string[] glyphs={"","","","",null,null};
   for(int i=0;i<modes.Length;i++) {
    var button=new ModernButton(names[i],ButtonKind.Secondary,glyphs[i]);
    string mode=modes[i],name=names[i];
-   button.Location=new Point(x,y);
    button.Click+=async(s,e)=>await Apply(mode,name);
-   x+=button.Width+Ui.Px(6);
    directions.Add(button);Controls.Add(button);
   }
-  y+=Ui.Px(38)+Ui.Px(12);
-  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
+  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false};
   Controls.Add(status);
-  // Kein Knopf "Schließen": zurück geht es über die Navigation (oder Esc).
-  y+=status.Height+Ui.Px(20);
-  ClientSize=new Size(w,y);
-  // Im Hauptfenster nutzt die Seite die volle Breite (Anker erst nach der Startgröße setzen).
-  intro.Anchor=card.Anchor=status.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;
-  pick.Anchor=AnchorStyles.Top|AnchorStyles.Right;
-  windowTitle.Anchor=windowDetail.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;
+  // Links: offene Fenster zum Auswählen (falls das Fenster verdeckt ist), rechts: zuletzt ausgerichtet.
+  listTitle=new Label{Text="Offene Fenster",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Bg,AutoSize=true};
+  Controls.Add(listTitle);
+  refresh=new ModernButton("Aktualisieren",ButtonKind.Ghost,"");
+  refresh.Height=Ui.Px(32);refresh.Margin=new Padding(0);
+  refresh.Click+=(s,e)=>LoadWindows();
+  Controls.Add(refresh);
+  listCard=new Card{Padding=new Padding(Ui.Px(4))};
+  SetupList(windows,Ui.Px(44),DrawWindow);
+  windows.SelectedIndexChanged+=(s,e)=>ChooseFromList();
+  listCard.Controls.Add(windows);
+  Controls.Add(listCard);
+  recentTitle=new Label{Text="Zuletzt ausgerichtet",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Bg,AutoSize=true};
+  Controls.Add(recentTitle);
+  recentCard=new Card{Padding=new Padding(Ui.Px(4))};
+  SetupList(results,Ui.Px(44),DrawResult);
+  results.SelectionMode=SelectionMode.None;
+  recentEmpty=new Label{Text="Noch nichts ausgerichtet.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleCenter,Dock=DockStyle.Fill};
+  recentCard.Controls.Add(results);recentCard.Controls.Add(recentEmpty);
+  Controls.Add(recentCard);
+  ClientSize=new Size(w,Ui.Px(560));
+  Resize+=(s,e)=>Arrange();
+  Arrange();
   timer.Tick+=(s,e)=>CheckForeground();
   FormClosed+=(s,e)=>{timer.Stop();timer.Dispose();};
+  LoadWindows();
+  ShowResults();
   UpdateButtons();
+ }
+ void SetupList(ListBox box,int itemHeight,DrawItemEventHandler draw) {
+  box.Dock=DockStyle.Fill;box.BorderStyle=BorderStyle.None;box.IntegralHeight=false;
+  box.DrawMode=DrawMode.OwnerDrawFixed;box.ItemHeight=itemHeight;
+  box.BackColor=Ui.Surface;box.ForeColor=Ui.TextColor;
+  box.DrawItem+=draw;
+  box.HandleCreated+=(s,e)=>Native.DarkScroll((Control)s);
+ }
+ void LayoutCard() {
+  pick.Location=new Point(card.Width-Ui.Px(13)-pick.Width,(card.Height-pick.Height)/2);
+  int textWidth=Math.Max(Ui.Px(40),pick.Left-Ui.Px(28));
+  windowTitle.Bounds=new Rectangle(Ui.Px(16),Ui.Px(10),textWidth,Ui.Px(22));
+  windowDetail.Bounds=new Rectangle(Ui.Px(16),Ui.Px(33),textWidth,Ui.Px(20));
+ }
+ // Seite füllt den Inhaltsbereich: oben Auswahl und Richtungen, darunter zwei Listen nebeneinander.
+ void Arrange() {
+  int pad=Ui.Px(24),inner=Math.Max(Ui.Px(500),ClientSize.Width-2*pad),y=Ui.Px(4);
+  int h=TextRenderer.MeasureText(intro.Text,intro.Font,new Size(inner,0),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height+Ui.Px(4);
+  intro.Bounds=new Rectangle(pad,y,inner,h);
+  y+=h+Ui.Px(14);
+  card.Bounds=new Rectangle(pad,y,inner,Ui.Px(64));
+  y+=card.Height+Ui.Px(16);
+  int x=pad;
+  foreach(var button in directions){button.Location=new Point(x,y);x+=button.Width+Ui.Px(6);}
+  y+=Ui.Px(38)+Ui.Px(10);
+  status.Bounds=new Rectangle(pad,y,inner,Ui.Px(40));
+  y+=Ui.Px(40)+Ui.Px(12);
+  int gapBetween=Ui.Px(16);
+  int left=(int)((inner-gapBetween)*0.58),right=inner-gapBetween-left;
+  int headH=Ui.Px(32);
+  listTitle.Location=new Point(pad,y+(headH-listTitle.Height)/2);
+  refresh.Location=new Point(pad+left-refresh.Width,y+(headH-refresh.Height)/2);
+  recentTitle.Location=new Point(pad+left+gapBetween,y+(headH-recentTitle.Height)/2);
+  y+=headH+Ui.Px(6);
+  int listH=Math.Max(Ui.Px(140),ClientSize.Height-Ui.Px(20)-y);
+  listCard.Bounds=new Rectangle(pad,y,left,listH);
+  recentCard.Bounds=new Rectangle(pad+left+gapBetween,y,right,listH);
  }
  // Vom Hauptfenster nach dem Anzeigen aufgerufen: gleich auf den Klick warten, meist ist genau das gewünscht.
  public void Begin(){StartPick();}
@@ -391,9 +446,10 @@ public class OneTimeAlignForm:FixedSizeForm {
   else Close();
  }
  void UpdateButtons() {
-  bool ready=target!=IntPtr.Zero&&!picking&&!working;
+  bool ready=(target!=IntPtr.Zero||demo)&&!picking&&!working;
   foreach(var button in directions)button.Enabled=ready;
   pick.Enabled=!picking&&!working;
+  windows.Enabled=!working;
  }
  void StartPick() {
   if(working)return;
@@ -419,21 +475,128 @@ public class OneTimeAlignForm:FixedSizeForm {
   GetWindowText(handle,title,title.Capacity);
   string processName="";
   try {using(var p=Process.GetProcessById((int)process))processName=p.ProcessName+".exe";} catch {}
-  target=handle;
-  targetName=title.Length>0?title.ToString():(processName.Length>0?processName:"Fenster");
-  windowTitle.Text=targetName;
-  windowDetail.Text=processName.Length>0?processName:"Prozess nicht lesbar";
-  StopPick();
-  status.Text="Fenster gewählt – jetzt die Richtung anklicken. Mehrere Richtungen nacheinander ergänzen sich.";
+  SetTarget(handle,title.ToString(),processName);
   // Das angeklickte Fenster liegt jetzt vorn: Programmfenster wieder nach vorn holen, damit die Richtungen erreichbar sind.
   var top=TopLevelControl as Form;
   if(top!=null)top.Activate();
  }
+ void SetTarget(IntPtr handle,string title,string processName) {
+  target=handle;
+  targetName=title.Length>0?title:(processName.Length>0?processName:"Fenster");
+  windowTitle.Text=targetName;
+  windowDetail.Text=processName.Length>0?processName:"Prozess nicht lesbar";
+  StopPick();
+  status.Text="Fenster gewählt – jetzt die Richtung anklicken. Mehrere Richtungen nacheinander ergänzen sich.";
+  // Auswahl in der Liste mitführen (ohne erneut auszuwählen).
+  loading=true;
+  int index=-1;
+  for(int i=0;i<windows.Items.Count;i++)if(((WindowItem)windows.Items[i]).Handle==handle){index=i;break;}
+  windows.SelectedIndex=index;
+  loading=false;
+ }
+ void ChooseFromList() {
+  if(loading)return;
+  var item=windows.SelectedItem as WindowItem;
+  if(item==null||item.Handle==IntPtr.Zero)return;
+  if(!IsWindow(item.Handle)){status.Text="Das Fenster ist nicht mehr geöffnet – „Aktualisieren“ lädt die Liste neu.";return;}
+  SetTarget(item.Handle,item.Title,item.Process);
+ }
+ void LoadWindows() {
+  var items=new List<WindowItem>();
+  if(MainForm.DemoMode) {
+   // Screenshots: feste Demo-Liste statt der tatsächlich offenen Fenster (deren Titel privat sein können).
+   items.Add(new WindowItem{Title="Downloads – Datei-Explorer",Process="explorer.exe"});
+   items.Add(new WindowItem{Title="Paint",Process="mspaint.exe"});
+   items.Add(new WindowItem{Title="Rechner",Process="CalculatorApp.exe"});
+   items.Add(new WindowItem{Title="Unbenannt – Editor",Process="Notepad.exe"});
+  } else {
+   foreach(var process in Process.GetProcesses()) using(process) {
+    try {
+     if(process.Id==(int)ownProcess||process.MainWindowHandle==IntPtr.Zero)continue;
+     string title=process.MainWindowTitle;
+     if(String.IsNullOrEmpty(title)||!IsWindowVisible(process.MainWindowHandle))continue;
+     var cls=new StringBuilder(256);
+     GetClassName(process.MainWindowHandle,cls,cls.Capacity);
+     if(IgnoredClasses.Contains(cls.ToString()))continue;
+     items.Add(new WindowItem{Handle=process.MainWindowHandle,Title=title,Process=process.ProcessName+".exe"});
+    } catch {}
+   }
+   items.Sort((a,b)=>String.Compare(a.Title,b.Title,StringComparison.CurrentCultureIgnoreCase));
+  }
+  loading=true;
+  windows.BeginUpdate();
+  windows.Items.Clear();
+  foreach(var item in items)windows.Items.Add(item);
+  windows.EndUpdate();
+  windows.SelectedIndex=-1;
+  for(int i=0;i<windows.Items.Count;i++)if(target!=IntPtr.Zero&&((WindowItem)windows.Items[i]).Handle==target)windows.SelectedIndex=i;
+  loading=false;
+ }
+ void ShowResults() {
+  results.BeginUpdate();
+  results.Items.Clear();
+  foreach(var r in recent)results.Items.Add(r);
+  results.EndUpdate();
+  recentEmpty.Visible=recent.Count==0;
+  results.Visible=recent.Count>0;
+ }
+ void AddResult(string text,bool failed) {
+  recent.Insert(0,new Result{Time=DateTime.Now,Title=targetName,Text=text,Failed=failed});
+  if(recent.Count>30)recent.RemoveAt(recent.Count-1);
+  ShowResults();
+ }
+ // Zwei Zeilen wie in "Programm hinzufügen": Titel fett, darunter grau der Prozess bzw. das Ergebnis.
+ void DrawRow(DrawItemEventArgs e,ListBox box,string title,string detail,string right,Color detailColor) {
+  var g=e.Graphics;
+  using(var back=new SolidBrush(Ui.Surface)) g.FillRectangle(back,e.Bounds);
+  bool selected=box.SelectionMode!=SelectionMode.None&&(e.State&DrawItemState.Selected)==DrawItemState.Selected;
+  g.SmoothingMode=SmoothingMode.AntiAlias;
+  var r=Rectangle.Inflate(e.Bounds,-Ui.Px(2),-Ui.Px(2));
+  if(selected) {
+   using(var path=Ui.Round(r,Ui.Px(4)))
+   using(var brush=new SolidBrush(Ui.Blend(Ui.Surface,Ui.Accent,0.16f))) g.FillPath(brush,path);
+   using(var path=Ui.Round(new Rectangle(r.X+Ui.Px(2),r.Y+r.Height/2-Ui.Px(8),Ui.Px(3),Ui.Px(16)),Ui.Px(1)))
+   using(var brush=new SolidBrush(Ui.Accent)) g.FillPath(brush,path);
+  }
+  var flags=TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.EndEllipsis|TextFormatFlags.Left|TextFormatFlags.NoPadding;
+  int x=r.X+Ui.Px(14),width=r.Width-Ui.Px(24);
+  int rightWidth=0;
+  if(right!=null) {
+   rightWidth=TextRenderer.MeasureText(right,Ui.SmallFont,Size.Empty,flags).Width+Ui.Px(8);
+   TextRenderer.DrawText(g,right,Ui.SmallFont,new Rectangle(r.Right-Ui.Px(10)-rightWidth,r.Y+Ui.Px(5),rightWidth,Ui.Px(20)),Ui.Muted,flags|TextFormatFlags.Right);
+  }
+  TextRenderer.DrawText(g,title,Ui.UiSemibold,new Rectangle(x,r.Y+Ui.Px(4),width-rightWidth,Ui.Px(20)),Ui.TextColor,flags);
+  TextRenderer.DrawText(g,detail,Ui.SmallFont,new Rectangle(x,r.Y+Ui.Px(22),width,Ui.Px(18)),detailColor,flags);
+ }
+ void DrawWindow(object sender,DrawItemEventArgs e) {
+  if(e.Index<0||e.Index>=windows.Items.Count){using(var back=new SolidBrush(Ui.Surface))e.Graphics.FillRectangle(back,e.Bounds);return;}
+  var item=(WindowItem)windows.Items[e.Index];
+  DrawRow(e,windows,item.Title,item.Process,null,Ui.Muted);
+ }
+ void DrawResult(object sender,DrawItemEventArgs e) {
+  if(e.Index<0||e.Index>=results.Items.Count){using(var back=new SolidBrush(Ui.Surface))e.Graphics.FillRectangle(back,e.Bounds);return;}
+  var item=(Result)results.Items[e.Index];
+  DrawRow(e,results,item.Title,item.Text,item.Time.ToString("HH:mm"),item.Failed?Ui.ErrorColor:Ui.Muted);
+ }
+ // Screenshots: Beispielwerte statt echter Fenster (nichts wird verschoben).
+ internal void DemoFill() {
+  demo=true;
+  targetName="Unbenannt – Editor";
+  windowTitle.Text=targetName;windowDetail.Text="Notepad.exe";
+  windows.SelectedIndex=windows.Items.Count-1;
+  recent.Clear();
+  recent.Add(new Result{Time=DateTime.Today.AddHours(22).AddMinutes(4),Title="Unbenannt – Editor",Text="Rechts: 18 px"});
+  recent.Add(new Result{Time=DateTime.Today.AddHours(22).AddMinutes(3),Title="Unbenannt – Editor",Text="Unten: 18 px"});
+  recent.Add(new Result{Time=DateTime.Today.AddHours(21).AddMinutes(58),Title="Rechner",Text="Waagerecht mittig"});
+  status.Text="Fenster gewählt – jetzt die Richtung anklicken. Mehrere Richtungen nacheinander ergänzen sich.";
+  ShowResults();
+  UpdateButtons();
+ }
  async Task Apply(string mode,string name) {
-  if(target==IntPtr.Zero||working||picking)return;
+  if(demo||target==IntPtr.Zero||working||picking)return;
   if(!IsWindow(target)) {
    target=IntPtr.Zero;windowTitle.Text="Noch kein Fenster gewählt";windowDetail.Text="Das Fenster ist nicht mehr geöffnet";
-   status.Text="Bitte erneut „Fenster anklicken“.";UpdateButtons();return;
+   status.Text="Bitte erneut „Fenster anklicken“ oder ein Fenster in der Liste wählen.";UpdateButtons();LoadWindows();return;
   }
   working=true;UpdateButtons();
   IntPtr handle=target;int pixels=gap();
@@ -441,9 +604,11 @@ public class OneTimeAlignForm:FixedSizeForm {
   try {
    string result=await Task.Run(()=>VisibleAlignment.AlignHandle(handle,pixels,mode));
    status.Text=result;
+   AddResult(result,false);
    log("Einmalig ausrichten – "+targetName+": "+result);
   } catch(Exception ex) {
    status.Text=ex.Message;
+   AddResult(ex.Message,true);
    log("Einmalig ausrichten – "+targetName+": "+ex.Message);
   } finally {working=false;UpdateButtons();}
  }
@@ -477,6 +642,11 @@ public class AlignRulesForm:FixedSizeForm {
  readonly ModernButton standard,ok,cancel;
  readonly List<Action> placers=new List<Action>();
  readonly int head,rowH;
+ readonly ToolTip tips=new ModernToolTip();
+ // Zustand beim Öffnen: Vergleich zeigt, ob es ungespeicherte Änderungen gibt (Rückfrage beim Verlassen).
+ string initialState;
+ // Hinweis auf gegenseitige Nachbarbezüge (steht in der Statuszeile, solange nichts anderes dort steht).
+ string cycleNote="";
  int[] colW=new int[6],colLeft=new int[6];
  int colX,measureW;
  public AlignRulesForm(Icon icon,IEnumerable<Entry> list,Dictionary<string,HashSet<string>> current,Dictionary<string,Dictionary<string,int>> currentGaps,Dictionary<string,Dictionary<string,string>> currentRefs,int globalGap) {
@@ -550,7 +720,7 @@ public class AlignRulesForm:FixedSizeForm {
     var owner=entry;
     refLabel.Click+=(s,e)=>ShowRefMenu(owner,index,(Label)s);
     field.Visible=refLabel.Visible=cell.Checked;
-    cell.CheckedChanged+=(s,e)=>{field.Visible=cell.Checked;refLabel.Visible=cell.Checked;};
+    cell.CheckedChanged+=(s,e)=>{field.Visible=cell.Checked;refLabel.Visible=cell.Checked;UpdateCycles();};
     rows.Controls.Add(field);rows.Controls.Add(refLabel);
     fields[i]=box;labels[i]=refLabel;
    }
@@ -565,7 +735,9 @@ public class AlignRulesForm:FixedSizeForm {
   }
   card.Controls.Add(rows);card.Controls.Add(header);rows.BringToFront();
   Controls.Add(card);
-  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false};
+  // Statuszeile neben "Standard" auf Höhe der Knöpfe (zwei Zeilen Platz, voller Text im Tooltip).
+  status=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft};
+  status.TextChanged+=(s,e)=>tips.SetToolTip(status,status.Text);
   Controls.Add(status);
   standard=new ModernButton("Standard",ButtonKind.Secondary,"");
   standard.Click+=(s,e)=>ResetToDefaults();
@@ -575,12 +747,83 @@ public class AlignRulesForm:FixedSizeForm {
   ok.Click+=(s,e)=>Accept();
   // Rote Fehlerzeile links neben den Knöpfen auf gleicher Höhe.
   error=new Label{Text="",Font=Ui.SmallFont,ForeColor=Ui.ErrorColor,BackColor=Ui.Bg,Tag="error",AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleRight};
+  // Ein Fehler hat Vorrang vor der Statuszeile (beide stehen zwischen "Standard" und "Abbrechen").
+  error.TextChanged+=(s,e)=>status.Visible=error.Text.Length==0;
   Controls.Add(standard);Controls.Add(error);Controls.Add(cancel);Controls.Add(ok);
   AcceptButton=ok;CancelButton=cancel;
   // Starthöhe: Beschreibung, Tabelle, Statuszeile und Knöpfe; im Hauptfenster füllt die Seite den Inhaltsbereich.
-  ClientSize=new Size(w,Ui.Px(4)+DescriptionHeight(inner)+Ui.Px(6)+card.Height+Ui.Px(10)+Ui.Px(40)+Ui.Px(6)+Ui.Px(38)+Ui.Px(20));
+  ClientSize=new Size(w,Ui.Px(4)+DescriptionHeight(inner)+Ui.Px(14)+card.Height+Ui.Px(16)+Ui.Px(38)+Ui.Px(20));
   Resize+=(s,e)=>Arrange();
   Arrange();
+  UpdateCycles();
+  initialState=State();
+ }
+ public bool HasChanges{get{return initialState!=null&&State()!=initialState;}}
+ string State() {
+  var text=new StringBuilder();
+  foreach(var entry in programs) {
+   text.Append(entry.Id).Append(':');
+   foreach(var cell in cells[entry.Id])text.Append(cell.Checked?'1':'0');
+   foreach(var box in boxes[entry.Id])text.Append('|').Append(box==null?"":box.Text.Trim());
+   foreach(var target in refs[entry.Id])text.Append('|').Append(target??"");
+   text.Append(';');
+  }
+  return text.ToString();
+ }
+ // Gegenseitige Nachbarbezüge erkennen (z.B. Task-Manager links an TeamSpeak 3 und TeamSpeak 3 rechts an Task-Manager):
+ // Das funktioniert, ist aber schwer zu durchschauen – beim Ausrichten zählt die Lage, die das andere Fenster gerade hat.
+ // Bezüge innerhalb eines solchen Kreises werden orange markiert, die Statuszeile nennt die Programme.
+ void UpdateCycles() {
+  var graph=new Dictionary<string,HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+  foreach(var entry in programs) {
+   var targets=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+   for(int i=0;i<EdgeCount;i++) {
+    var neighbor=NeighborOf(refs[entry.Id][i]);
+    if(neighbor!=null&&cells[entry.Id][i].Checked)targets.Add(neighbor.Id);
+   }
+   graph[entry.Id]=targets;
+  }
+  var reach=new Dictionary<string,HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+  foreach(var id in graph.Keys) {
+   var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+   var open=new Stack<string>(graph[id]);
+   while(open.Count>0) {
+    string next=open.Pop();
+    if(!seen.Add(next))continue;
+    HashSet<string> more;
+    if(graph.TryGetValue(next,out more))foreach(var m in more)open.Push(m);
+   }
+   reach[id]=seen;
+  }
+  var groups=new List<List<Entry>>();
+  var grouped=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  foreach(var entry in programs) {
+   if(grouped.Contains(entry.Id)||!reach[entry.Id].Contains(entry.Id))continue;
+   var group=programs.Where(x=>reach[entry.Id].Contains(x.Id)&&reach[x.Id].Contains(entry.Id)).ToList();
+   foreach(var x in group)grouped.Add(x.Id);
+   groups.Add(group);
+  }
+  foreach(var entry in programs)
+   for(int i=0;i<EdgeCount;i++) {
+    var neighbor=NeighborOf(refs[entry.Id][i]);
+    var owner=entry;
+    bool inCycle=neighbor!=null&&cells[entry.Id][i].Checked&&groups.Any(g=>g.Contains(owner)&&g.Contains(neighbor));
+    var label=refLabels[entry.Id][i];
+    label.Tag=inCycle?"warning":"accent";
+    label.ForeColor=inCycle?Ui.WarningColor:Ui.Accent;
+   }
+  string note="";
+  if(groups.Count>0) {
+   var parts=groups.Select(g=>NameList(g.Select(x=>"„"+x.Name+"“").ToList())).ToArray();
+   bool pair=groups.All(g=>g.Count==2);
+   note="Hinweis: "+String.Join("; ",parts)+(pair?" beziehen sich gegenseitig":" beziehen sich im Kreis aufeinander")+" (orange markiert). Beim Ausrichten zählt dann die Lage, die das andere Fenster gerade hat.";
+  }
+  if(status.Text.Length==0||status.Text==cycleNote)status.Text=note;
+  cycleNote=note;
+ }
+ static string NameList(List<string> names) {
+  if(names.Count<2)return names.Count==1?names[0]:"";
+  return String.Join(", ",names.Take(names.Count-1).ToArray())+" und "+names[names.Count-1];
  }
  int DescriptionHeight(int width) {
   return TextRenderer.MeasureText(description.Text,description.Font,new Size(width,0),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height+Ui.Px(4);
@@ -592,18 +835,19 @@ public class AlignRulesForm:FixedSizeForm {
   int y=Ui.Px(4);
   int descriptionHeight=DescriptionHeight(inner);
   description.Bounds=new Rectangle(pad,y,inner,descriptionHeight);
-  y+=descriptionHeight+Ui.Px(6);
+  y+=descriptionHeight+Ui.Px(14);
   int buttonsTop=ClientSize.Height-Ui.Px(20)-Ui.Px(38);
-  int statusTop=buttonsTop-Ui.Px(6)-Ui.Px(40);
-  int cardHeight=Math.Max(head+rowH+Ui.Px(10),statusTop-Ui.Px(10)-y);
+  int cardHeight=Math.Max(head+rowH+Ui.Px(10),buttonsTop-Ui.Px(16)-y);
   card.Bounds=new Rectangle(pad,y,inner,cardHeight);
-  status.Bounds=new Rectangle(pad,card.Bottom+Ui.Px(10),inner,Ui.Px(40));
-  buttonsTop=status.Bottom+Ui.Px(6);
+  buttonsTop=card.Bottom+Ui.Px(16);
   standard.Location=new Point(pad,buttonsTop);
   ok.Location=new Point(pad+inner-ok.Width,buttonsTop);
   // Globale Richtlinien, Einstellungsseiten: "Abbrechen" links, "Speichern" als Primärknopf ganz rechts, 10 Abstand.
   cancel.Location=new Point(ok.Left-Ui.Px(10)-cancel.Width,buttonsTop);
-  error.Bounds=new Rectangle(standard.Right+Ui.Px(12),buttonsTop,Math.Max(0,cancel.Left-Ui.Px(12)-standard.Right-Ui.Px(12)),ok.Height);
+  // Statuszeile und rote Fehlerzeile teilen sich den Platz zwischen "Standard" und "Abbrechen".
+  var line=new Rectangle(standard.Right+Ui.Px(16),buttonsTop,Math.Max(0,cancel.Left-Ui.Px(16)-standard.Right-Ui.Px(16)),ok.Height);
+  status.Bounds=line;
+  error.Bounds=line;
   // Spalten: Grundbreiten 124 (Kanten), 70 (Mitte), 96 (Messen); Programmspalte mindestens 220.
   float baseSum=4*124+2*70+96;
   int available=inner-Ui.Px(14)-Ui.Px(220);
@@ -632,14 +876,14 @@ public class AlignRulesForm:FixedSizeForm {
   MenuStyle.Prepare(refMenu);
   refMenu.Items.Add(MenuStyle.TopSpacer());
   string current=refs[entry.Id][index];
-  refMenu.Items.Add(MenuStyle.Item("Bildschirmrand",current==null?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=null;UpdateRefLabel(entry.Id,index);}));
+  refMenu.Items.Add(MenuStyle.Item("Bildschirmrand",current==null?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=null;UpdateRefLabel(entry.Id,index);UpdateCycles();}));
   refMenu.Items.Add(new ToolStripSeparator());
   string side=Directions[index]=="left"?"rechts neben":Directions[index]=="right"?"links neben":Directions[index]=="top"?"unter":"über";
   foreach(var other in programs) {
    if(other.Id==entry.Id)continue;
    var target=other;
    bool isCurrent=String.Equals(current,other.Id,StringComparison.OrdinalIgnoreCase);
-   refMenu.Items.Add(MenuStyle.Item(side+" "+other.Name,isCurrent?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=target.Id;UpdateRefLabel(entry.Id,index);}));
+   refMenu.Items.Add(MenuStyle.Item(side+" "+other.Name,isCurrent?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=target.Id;UpdateRefLabel(entry.Id,index);UpdateCycles();}));
   }
   refMenu.Items.Add(MenuStyle.BottomSpacer());
   refMenu.Show(anchor,new Point(0,anchor.Height));
@@ -681,6 +925,8 @@ public class AlignRulesForm:FixedSizeForm {
    foreach(var box in boxes[entry.Id])box.Text="";
    for(int i=0;i<EdgeCount;i++){refs[entry.Id][i]=null;UpdateRefLabel(entry.Id,i);}
   }
+  status.Text="";
+  UpdateCycles();
   status.Text="Vorgaben wiederhergestellt (erst mit „Speichern“ übernommen).";
  }
  void Accept() {
@@ -712,12 +958,31 @@ public class AlignRulesForm:FixedSizeForm {
    rules[entry.Id]=set;allGaps[entry.Id]=gaps;allRefs[entry.Id]=entryRefs;
   }
   Rules=rules;Gaps=allGaps;Refs=allRefs;
-  if(Save!=null) {
-   string message=Save();
-   if(message!=null){error.Text=message;return;}
+  if(Save==null){DialogResult=DialogResult.OK;Close();return;}
+  string message=Save();
+  if(message!=null){error.Text=message;return;}
+  // Globale Richtlinien, Einstellungsseiten: Speichern schließt die Seite nicht, sondern zeigt eine kurze grüne Meldung.
+  initialState=State();
+  ShowSaved();
+ }
+ const string SavedText="Gespeichert – gilt ab jetzt für „Wiederherstellen“ und das Ausrichten.";
+ System.Windows.Forms.Timer savedTimer;
+ void ShowSaved() {
+  status.Tag="success";
+  status.ForeColor=Ui.SuccessColor;
+  status.Text=SavedText;
+  if(savedTimer==null) {
+   savedTimer=new System.Windows.Forms.Timer{Interval=4000};
+   savedTimer.Tick+=(s,e)=>{
+    savedTimer.Stop();
+    status.Tag="muted";
+    status.ForeColor=Ui.Muted;
+    if(status.Text==SavedText)status.Text=cycleNote;
+   };
+   FormClosed+=(s,e)=>savedTimer.Dispose();
   }
-  DialogResult=DialogResult.OK;
-  Close();
+  savedTimer.Stop();
+  savedTimer.Start();
  }
 }
 // Einzelnes Häkchen (wie in der Programmliste), anklickbar und per Leertaste umschaltbar.

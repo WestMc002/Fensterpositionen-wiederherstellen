@@ -46,6 +46,12 @@ static class Program {
   }
   // Neustart durch das Update-Skript: Ergebnis des Updates ins Protokoll schreiben.
   if(args.Any(x=>x=="--nach-update"))MainForm.AfterUpdate=true;
+  // Verknüpfung "Fenster wiederherstellen": --wiederherstellen [Anordnung] stellt minimiert wieder her und beendet sich bei Erfolg.
+  int restore=Array.IndexOf(args,"--wiederherstellen");
+  if(restore>=0) {
+   MainForm.AutoRestore=true;
+   if(restore+1<args.Length&&!args[restore+1].StartsWith("--"))Store.Override=args[restore+1];
+  }
   try {Application.Run(new MainForm());}catch(Exception e){MessageBox.Show(e.Message,"Fensterpositionen",MessageBoxButtons.OK,MessageBoxIcon.Error);}
  }
 }

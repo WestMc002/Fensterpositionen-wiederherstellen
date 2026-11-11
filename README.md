@@ -31,7 +31,9 @@ The interface is in German.
 - **Add any program:** pick any open window, its position and size are saved right away. Remove it again with a right-click.
 - **Only what you use:** built-in programs that are not installed are not shown; others can be hidden with a right-click (and shown again the same way).
 - **Align windows** to the visible window edge: top, bottom, left, right, centred horizontally (“↔ Mitte”) or vertically (“↕ Mitte”), or “Automatisch” with all edges you ticked for the program (top + bottom = full height, left + right = full width). The distance to the edge of the work area is adjustable (default 18 px). Invisible Windows borders and DPI scaling are taken into account. Your own programs have no edges preset – tick the ones you want. Each edge can get its own distance per program (e.g. left 1200 px), or take it from the window’s current position with “Messen”. An edge can also keep a distance to a neighbouring program instead of the screen edge (e.g. 18 px right of Discord). “Wiederherstellen” applies these edges after restoring.
-- **Align once:** click any open window and align it without adding it to the list; nothing is saved.
+- **Align once:** click any open window (or pick it from the list of open windows) and align it without adding it to the list; nothing is saved. The page lists what was aligned recently.
+- **Several arrangements**, e.g. “Arbeit” and “Spielen”: each has its own positions and edges, switch with one click on the start page.
+- **Restore without the window:** a desktop shortcut (from the arrangement menu) restores an arrangement minimised and closes again when everything worked – e.g. for the Startup folder.
 - **Correction while starting:** saved alignment rules are re-applied while a program loads.
 - Nothing is selected at start – only the checked programs are processed.
 - Restart as administrator with one click (needed for programs running elevated).
@@ -42,7 +44,7 @@ The interface is in German.
 
 ### Installation
 
-1. Download the ZIP file from the [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) and extract it to any folder.
+1. Download the ZIP file from the [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) and extract it to a folder of its own with write access (needed for the automatic update), e.g. `C:\Tools\Fensterpositionen wiederherstellen`.
 2. Start `Fensterpositionen wiederherstellen.exe` with a double-click.
 
 Requirements: Windows 10 or 11 with .NET Framework 4.x (included in Windows).
@@ -78,7 +80,9 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 - **Beliebige Programme hinzufügen:** ein geöffnetes Fenster auswählen, Position und Größe werden gleich gespeichert. Entfernen per Rechtsklick.
 - **Nur was du brauchst:** Fest eingebaute Programme, die nicht installiert sind, erscheinen nicht; andere lassen sich per Rechtsklick ausblenden (und genauso wieder anzeigen).
 - **Fenster ausrichten** an der sichtbaren Fensterkante: oben, unten, links, rechts, waagerecht („↔ Mitte“) oder senkrecht („↕ Mitte“) mittig, oder „Automatisch“ mit allen Kanten, die je Programm angehakt sind (oben + unten = volle Höhe, links + rechts = volle Breite). Der Abstand zum Rand des Arbeitsbereichs ist einstellbar (Standard 18 px). Unsichtbare Windows-Fensterrahmen und DPI-Skalierung werden berücksichtigt. Eigene Programme haben keine Kanten-Vorgabe – die gewünschten selbst anhaken. Jede Kante kann je Programm einen eigenen Abstand bekommen (z. B. links 1200 px) oder ihn mit „Messen“ von der aktuellen Fensterposition übernehmen. Statt zum Bildschirmrand kann eine Kante auch einen Abstand zu einem Nachbarprogramm halten (z. B. 18 px rechts neben Discord). „Wiederherstellen“ richtet diese Kanten danach aus.
-- **Einmalig ausrichten:** ein beliebiges offenes Fenster anklicken und ausrichten, ohne es in die Liste aufzunehmen; nichts wird gespeichert.
+- **Einmalig ausrichten:** ein beliebiges offenes Fenster anklicken (oder aus der Liste der offenen Fenster wählen) und ausrichten, ohne es in die Liste aufzunehmen; nichts wird gespeichert. Die Seite zeigt, was zuletzt ausgerichtet wurde.
+- **Mehrere Anordnungen**, z. B. „Arbeit“ und „Spielen“: jede mit eigenen Positionen und Kanten, umschaltbar auf der Startseite.
+- **Wiederherstellen ohne Fenster:** eine Verknüpfung auf dem Desktop (aus dem Anordnungs-Menü) stellt eine Anordnung minimiert wieder her und beendet sich, wenn alles geklappt hat – z. B. für den Autostart-Ordner.
 - **Nachkorrektur beim Start:** gespeicherte Ausrichtungen werden während der Ladephase eines Programms erneut angewandt.
 - Beim Start ist nichts angehakt – bearbeitet wird nur, was angehakt ist.
 - Neustart als Administrator per Klick (nötig für Programme, die mit Administratorrechten laufen).
@@ -89,7 +93,7 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 
 ### Installation
 
-1. Die ZIP-Datei aus den [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) herunterladen und in einen beliebigen Ordner entpacken.
+1. Die ZIP-Datei aus den [Releases](https://github.com/WestMc002/Fensterpositionen-wiederherstellen/releases) herunterladen und in einen eigenen Ordner mit Schreibrechten entpacken (nötig für die automatische Aktualisierung), z. B. `C:\Tools\Fensterpositionen wiederherstellen`.
 2. `Fensterpositionen wiederherstellen.exe` per Doppelklick starten.
 
 Voraussetzungen: Windows 10 oder 11 mit .NET Framework 4.x (in Windows enthalten).
@@ -128,6 +132,11 @@ Selbsttest: `"Fensterpositionen wiederherstellen.exe" --self-test` (arbeitet nur
     <td><img src="Screenshots/kanten-dunkel.png" alt="Edges per program / Kanten je Programm, dunkel"></td>
   </tr>
   <tr><td colspan="2" align="center">Edges per program · Kanten je Programm</td></tr>
+  <tr>
+    <td><img src="Screenshots/einmalig-hell.png" alt="Align once / Einmalig ausrichten, hell"></td>
+    <td><img src="Screenshots/einmalig-dunkel.png" alt="Align once / Einmalig ausrichten, dunkel"></td>
+  </tr>
+  <tr><td colspan="2" align="center">Align once · Einmalig ausrichten</td></tr>
   <tr>
     <td><img src="Screenshots/hinzufuegen-hell.png" alt="Add program / Programm hinzufügen, hell"></td>
     <td><img src="Screenshots/hinzufuegen-dunkel.png" alt="Add program / Programm hinzufügen, dunkel"></td>

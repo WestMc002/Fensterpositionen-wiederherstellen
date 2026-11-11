@@ -124,9 +124,112 @@ public static class Store {
    else System.IO.File.Move(temp,path);
   } finally { if(System.IO.File.Exists(temp)) System.IO.File.Delete(temp); }
  }
- // Startwerte.json liegt im Ordner Resources (früher direkt neben der EXE).
- public static Dictionary<string,object> Load() {
+ // Anordnungen (ab 2.48): Neben der Standard-Anordnung (Werte direkt in Positionen.json) lassen sich weitere
+ // Anordnungen anlegen, z.B. "Arbeit" und "Spielen". Sie stehen in Positionen.json unter "_anordnungen" und enthalten
+ // je Anordnung die Programmpositionen und die Kanten-Einstellungen; die aktive steht unter "_anordnung".
+ // Eigene Programme, ausgeblendete Programme, Navigation und Update-Einstellungen gelten für alle Anordnungen.
+ // Load() liefert immer die Sicht der aktiven Anordnung, SaveProfiles() schreibt sie an die richtige Stelle zurück.
+ public const string ArrangementsKey="_anordnungen",ActiveKey="_anordnung",StandardName="Standard";
+ static readonly string[] PerArrangement={"_edges","_edgegaps","_edgerefs","_gap","_skip","_alignment","_auswahl"};
+ // Nur für diesen Programmlauf (Aufruf mit --wiederherstellen "Name"); wird nicht gespeichert.
+ public static string Override;
+ public static bool IsArrangementKey(string key){return !key.StartsWith("_")||Array.IndexOf(PerArrangement,key)>=0;}
+ public static Dictionary<string,object> Arrangements(Dictionary<string,object> raw) {
+  var found=raw!=null&&raw.ContainsKey(ArrangementsKey)?raw[ArrangementsKey] as Dictionary<string,object>:null;
+  return found??new Dictionary<string,object>();
+ }
+ // Gespeicherter Name in der Schreibweise der Datei (Groß/klein egal), sonst null.
+ public static string FindArrangement(Dictionary<string,object> raw,string name) {
+  if(String.IsNullOrEmpty(name))return null;
+  if(String.Equals(name,StandardName,StringComparison.OrdinalIgnoreCase))return StandardName;
+  foreach(string key in Arrangements(raw).Keys)if(String.Equals(key,name,StringComparison.OrdinalIgnoreCase))return key;
+  return null;
+ }
+ public static string ActiveName(Dictionary<string,object> raw) {
+  string name=FindArrangement(raw,Override);
+  if(name==null&&raw!=null&&raw.ContainsKey(ActiveKey))name=FindArrangement(raw,Convert.ToString(raw[ActiveKey]));
+  return name??StandardName;
+ }
+ public static List<string> ArrangementNames(Dictionary<string,object> raw) {
+  var names=new List<string>(Arrangements(raw).Keys);
+  names.Sort(StringComparer.CurrentCultureIgnoreCase);
+  names.Insert(0,StandardName);
+  return names;
+ }
+ // Inhalt von Positionen.json, wie er in der Datei steht (ohne Umrechnung auf die aktive Anordnung).
+ public static Dictionary<string,object> LoadRaw() {
   if(System.IO.File.Exists(Profiles))return Read(Profiles);
+  return LoadStart();
+ }
+ // Sicht der aktiven Anordnung: globale Einstellungen + Positionen und Kanten der Anordnung.
+ public static Dictionary<string,object> Load() {
+  var raw=LoadRaw();
+  string active=ActiveName(raw);
+  if(active==StandardName)return raw;
+  var view=new Dictionary<string,object>();
+  foreach(var pair in raw)if(!IsArrangementKey(pair.Key))view[pair.Key]=pair.Value;
+  var data=Arrangements(raw)[active] as Dictionary<string,object>;
+  if(data!=null)foreach(var pair in data)if(IsArrangementKey(pair.Key))view[pair.Key]=pair.Value;
+  return view;
+ }
+ // Sicht der aktiven Anordnung zurückschreiben (statt Write(Profiles,…)): Werte der Anordnung landen unter
+ // "_anordnungen", globale Einstellungen direkt in Positionen.json, die anderen Anordnungen bleiben unverändert.
+ public static void SaveProfiles(Dictionary<string,object> view) {
+  var raw=System.IO.File.Exists(Profiles)?Read(Profiles):new Dictionary<string,object>();
+  string active=ActiveName(raw);
+  var output=new Dictionary<string,object>();
+  if(active==StandardName) {
+   foreach(var pair in view)if(pair.Key!=ArrangementsKey&&pair.Key!=ActiveKey)output[pair.Key]=pair.Value;
+  } else {
+   foreach(var pair in raw)if(IsArrangementKey(pair.Key))output[pair.Key]=pair.Value;
+   foreach(var pair in view)if(!IsArrangementKey(pair.Key)&&pair.Key!=ArrangementsKey&&pair.Key!=ActiveKey)output[pair.Key]=pair.Value;
+   var arrangements=new Dictionary<string,object>(Arrangements(raw));
+   var data=new Dictionary<string,object>();
+   foreach(var pair in view)if(IsArrangementKey(pair.Key))data[pair.Key]=pair.Value;
+   arrangements[active]=data;
+   output[ArrangementsKey]=arrangements;
+  }
+  if(active==StandardName&&raw.ContainsKey(ArrangementsKey))output[ArrangementsKey]=raw[ArrangementsKey];
+  if(raw.ContainsKey(ActiveKey))output[ActiveKey]=raw[ActiveKey];
+  Write(Profiles,output);
+ }
+ public static void SetActiveArrangement(string name) {
+  var raw=LoadRaw();
+  if(name==StandardName)raw.Remove(ActiveKey);else raw[ActiveKey]=name;
+  Write(Profiles,raw);
+ }
+ // Neue Anordnung als Kopie der Werte aus view (Positionen und Kanten); wird gleich aktiv.
+ public static void CreateArrangement(string name,Dictionary<string,object> view) {
+  var raw=LoadRaw();
+  var arrangements=new Dictionary<string,object>(Arrangements(raw));
+  var data=new Dictionary<string,object>();
+  foreach(var pair in view)if(IsArrangementKey(pair.Key))data[pair.Key]=pair.Value;
+  arrangements[name]=Json().Deserialize<Dictionary<string,object>>(Json().Serialize(data));
+  raw[ArrangementsKey]=arrangements;
+  raw[ActiveKey]=name;
+  Write(Profiles,raw);
+ }
+ public static void RenameArrangement(string oldName,string newName) {
+  var raw=LoadRaw();
+  var arrangements=new Dictionary<string,object>(Arrangements(raw));
+  if(!arrangements.ContainsKey(oldName))return;
+  object data=arrangements[oldName];
+  arrangements.Remove(oldName);
+  arrangements[newName]=data;
+  raw[ArrangementsKey]=arrangements;
+  if(raw.ContainsKey(ActiveKey)&&Convert.ToString(raw[ActiveKey])==oldName)raw[ActiveKey]=newName;
+  Write(Profiles,raw);
+ }
+ public static void DeleteArrangement(string name) {
+  var raw=LoadRaw();
+  var arrangements=new Dictionary<string,object>(Arrangements(raw));
+  arrangements.Remove(name);
+  if(arrangements.Count==0)raw.Remove(ArrangementsKey);else raw[ArrangementsKey]=arrangements;
+  if(raw.ContainsKey(ActiveKey)&&Convert.ToString(raw[ActiveKey])==name)raw.Remove(ActiveKey);
+  Write(Profiles,raw);
+ }
+ // Startwerte.json liegt im Ordner Resources (früher direkt neben der EXE).
+ static Dictionary<string,object> LoadStart() {
   string start=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Resources","Startwerte.json");
   if(!System.IO.File.Exists(start))start=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Startwerte.json");
   // Ohne Startwerte (z.B. nur die EXE aus einem GitHub-Release) mit leeren Positionen beginnen.
@@ -233,7 +336,21 @@ static class SelfTest {
    if(!loaded.ContainsKey("test"))throw new Exception("Profil nicht gespeichert");
    var custom=Store.CustomEntries(loaded);
    if(custom.Count!=1||custom[0].ProcessName!="notepad"||!custom[0].WindowOnly)throw new Exception("Eigenes Programm nicht gespeichert");
-   System.IO.File.WriteAllText(resultFile,"OK: Position wiederhergestellt, andere Einstellungen erhalten, Sicherung erstellt, unvollstaendige Werte abgewiesen, Profil und eigenes Programm gespeichert.");
+   // Anordnungen: eigene Positionen je Anordnung, eigene Programme gelten für alle.
+   Store.CreateArrangement("Spielen",loaded);
+   var play=Store.Load();
+   play["test"]=new Dictionary<string,object>{{"windowState",new Dictionary<string,object>{{"x",5},{"y",6}}}};
+   play["_gap"]=30;
+   Store.SaveProfiles(play);
+   Store.SetActiveArrangement(Store.StandardName);
+   var standard=Store.Load();
+   if(Store.Json().Serialize(standard["test"])!=Store.Json().Serialize(target)||standard.ContainsKey("_gap"))throw new Exception("Anordnung Standard veraendert");
+   if(Store.CustomEntries(standard).Count!=1)throw new Exception("Eigene Programme fehlen in Standard");
+   Store.Override="spielen";
+   var again=Store.Load();
+   Store.Override=null;
+   if(Convert.ToInt32(again["_gap"])!=30||Store.CustomEntries(again).Count!=1)throw new Exception("Anordnung Spielen nicht gespeichert");
+   System.IO.File.WriteAllText(resultFile,"OK: Position wiederhergestellt, andere Einstellungen erhalten, Sicherung erstellt, unvollstaendige Werte abgewiesen, Profil, eigenes Programm und Anordnungen gespeichert.");
    ok=true;
   } catch(Exception ex) {System.IO.File.WriteAllText(resultFile,"FEHLER: "+ex);Environment.ExitCode=1;}
   if(ok)try{Directory.Delete(test,true);}catch{}

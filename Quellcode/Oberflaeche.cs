@@ -197,6 +197,11 @@ public class ModernButton:Button {
  // Art und Symbol lassen sich nachträglich ändern (z.B. "Jetzt prüfen" → "Aktualisieren").
  public ButtonKind Kind{get{return kind;}set{kind=value;Font=kind==ButtonKind.Ghost?Ui.UiFont:Ui.UiSemibold;UpdateWidth();Invalidate();}}
  public string Glyph{get{return glyph;}set{glyph=value;UpdateWidth();Invalidate();}}
+ // Auswahlfeld im Windows-11-Stil (Globale Richtlinien): Text links, Pfeil (Chevron) rechts, Auswahl über ein Menü.
+ bool dropDown;
+ public bool DropDown{get{return dropDown;}set{dropDown=value;UpdateWidth();Invalidate();}}
+ static Font chevronFont;
+ static Font ChevronFont{get{if(chevronFont==null&&Ui.IconFont!=null)chevronFont=new Font(Ui.IconFont.FontFamily,8f);return chevronFont;}}
  public ModernButton(string text,ButtonKind kind,string glyph) {
   this.kind=kind;this.glyph=glyph;
   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);
@@ -210,6 +215,7 @@ public class ModernButton:Button {
   if(Font==null)return;
   int width=TextRenderer.MeasureText(Text,Font).Width+Ui.Px(28);
   if(HasGlyph)width+=Ui.Px(26);
+  if(dropDown)width+=Ui.Px(24);
   Width=width;
  }
  protected override void OnTextChanged(EventArgs e){base.OnTextChanged(e);UpdateWidth();Invalidate();}
@@ -249,6 +255,11 @@ public class ModernButton:Button {
   int textWidth=TextRenderer.MeasureText(Text,Font,Size.Empty,flags).Width;
   int total=textWidth+(HasGlyph?Ui.Px(26):0);
   int x=(Width-total)/2;
+  if(dropDown) {
+   // Pfeil rechts, Text links.
+   x=Ui.Px(14);
+   if(ChevronFont!=null)TextRenderer.DrawText(g,"\uE70D",ChevronFont,new Rectangle(Width-Ui.Px(14)-Ui.Px(14),0,Ui.Px(14),Height),Enabled?Ui.Muted:Ui.Blend(Ui.Muted,parent,0.4f),flags|TextFormatFlags.HorizontalCenter);
+  }
   if(HasGlyph) {
    TextRenderer.DrawText(g,glyph,glyphFont??Ui.IconFont,new Rectangle(x,0,Ui.Px(18),Height),fore,flags|TextFormatFlags.HorizontalCenter);
    x+=Ui.Px(26);
@@ -339,7 +350,7 @@ public class HeaderPanel:Panel {
  public event EventHandler BadgeClick;
  Rectangle badgeRect;
  Font badgeFont;float badgeScale;
- readonly ToolTip tip=new ToolTip();
+ readonly ToolTip tip=new ModernToolTip();
  protected override void OnMouseMove(MouseEventArgs e) {
   base.OnMouseMove(e);
   bool over=badgeRect.Contains(e.Location);
@@ -479,7 +490,7 @@ public class ProgramList:Panel {
  public event EventHandler CheckedChanged;
  // Rechtsklick auf eine Zeile (z.B. eigenes Programm entfernen).
  public event EventHandler<RowMenuEventArgs> RowMenu;
- readonly ToolTip tip=new ToolTip();
+ readonly ToolTip tip=new ModernToolTip();
  int hover=-1,focusIndex;
  public ProgramList() {
   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.Selectable,true);
