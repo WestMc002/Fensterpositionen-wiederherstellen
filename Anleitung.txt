@@ -1,6 +1,6 @@
 ﻿FENSTERPOSITIONEN
 ================
-Version 2.49 (Build-Datum wird angehängt, z.B. 2.49.2026.1111)
+Version 2.50 (Build-Datum wird angehängt, z.B. 2.50.2026.1111)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
@@ -21,7 +21,8 @@ Links im Fenster steht die Navigation:
   und "Info über Fensterpositionen".
 ☰ klappt die Navigation ein (nur Symbole) bzw. aus. Die Stecknadel pinnt
 sie an: angepinnt bleibt sie offen und schiebt den Inhalt (Standard), sonst
-klappt sie über dem Inhalt aus und nach einer Auswahl wieder ein. Die Wahl
+klappt sie über dem Inhalt aus (auch, wenn die Maus kurz darauf verweilt)
+und nach einer Auswahl oder beim Verlassen wieder ein. Die Wahl
 wird in Positionen.json gespeichert (_nav).
 Wechselt man über die Navigation zu einer anderen Seite oder schließt das
 Fenster, während "Kanten je Programm" ungespeicherte Änderungen hat, fragt
@@ -524,6 +525,12 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.50           Navigation: nicht angepinnt klappt sie aus, wenn die Maus kurz
+               (ca. 0,4 s) darauf verweilt; bleibt offen, solange das Menü
+               "Einstellungen" offen ist.
+               Menüs bleiben bei mehreren Bildschirmen auf dem Bildschirm, auf
+               dem sie geöffnet werden. Auswahlmenüs (Anordnung, Nachbarprogramm)
+               zeigen die Auswahl als Punkt in Akzentfarbe.
 2.48 bis 2.49  Mehrere Anordnungen (z.B. "Arbeit" und "Spielen") mit eigenen
                Positionen und Kanten, umschaltbar neben "Positionen speichern".
                Verknüpfung "Fenster wiederherstellen" auf dem Desktop: stellt

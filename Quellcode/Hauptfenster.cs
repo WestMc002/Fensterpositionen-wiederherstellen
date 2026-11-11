@@ -268,7 +268,7 @@ public class MainForm:Form {
   alignAuto.Click+=async(s,e)=>await AlignWindows("auto");
   addProgram.Click+=(s,e)=>AddProgram();
   FormClosing+=(s,e)=>{if(busy||!ConfirmLeaveView())e.Cancel=true;};
-  FormClosed+=(s,e)=>navTimer.Stop();
+  FormClosed+=(s,e)=>{navTimer.Stop();navHover.Stop();};
   ApplyTheme();
   Log(AppInfo.Product+" Version "+AppInfo.Version+" – Farbschema: "+(Ui.Dark?"dunkel":"hell")+", Akzentfarbe "+Ui.Hex(Ui.AccentBase));
   TraceLog.Cleanup(30);
@@ -353,10 +353,20 @@ public class MainForm:Form {
   nav.Resize+=(s,e)=>LayoutNav();
   navTimer.Tick+=(s,e)=>{
    // Ausgeklappt, nicht angepinnt: wieder einklappen, sobald die Maus die Navigation verlässt.
-   if(!navOpen||NavPinned()||nav.Capture||!Visible)return;
+   // Solange das Menü "Einstellungen" offen ist, bleibt sie ausgeklappt.
+   if(!navOpen||NavPinned()||nav.Capture||!Visible||settingsMenu.Visible)return;
    if(!nav.RectangleToScreen(nav.ClientRectangle).Contains(Cursor.Position)){navOpen=false;ApplyNav();}
   };
   navTimer.Start();
+  // Nicht angepinnt: nach ca. 400 ms Verweilen auf der eingeklappten Navigation ausklappen (Globale Richtlinien,
+  // Navigation links; Vorlage: Wake on LAN, HookNavHover). Kurzes Überfahren löst nichts aus.
+  navHover.Tick+=(s,e)=>{
+   navHover.Stop();
+   if(NavPinned()||navOpen||!Visible||!OverNav())return;
+   navOpen=true;
+   ApplyNav();
+  };
+  HookNavHover(nav);
   // Seiten: Überschrift wie Wake on LAN (Segoe UI Semibold 20 pt), darunter das eingebettete Fenster.
   viewTitle=new Label{Dock=DockStyle.Top,Height=Ui.Px(56),Font=new Font("Segoe UI Semibold",20f),ForeColor=Ui.TextColor,BackColor=Ui.Bg,TextAlign=ContentAlignment.MiddleLeft,UseMnemonic=false};
   viewBody=new Panel{Dock=DockStyle.Fill,BackColor=Ui.Bg,AutoScroll=true};
@@ -365,6 +375,14 @@ public class MainForm:Form {
   viewTitle.Padding=new Padding(Ui.Px(24),0,0,0);
   viewHost.Controls.Add(viewBody);
   viewHost.Controls.Add(viewTitle);
+ }
+ readonly System.Windows.Forms.Timer navHover=new System.Windows.Forms.Timer{Interval=400};
+ bool OverNav(){return nav.RectangleToScreen(nav.ClientRectangle).Contains(Cursor.Position);}
+ void HookNavHover(Control c) {
+  c.MouseEnter+=(s,e)=>{if(!NavPinned()&&!navOpen&&!navHover.Enabled)navHover.Start();};
+  // Wechsel zwischen den Einträgen zählt nicht als Verlassen.
+  c.MouseLeave+=(s,e)=>{if(!OverNav())navHover.Stop();};
+  foreach(Control child in c.Controls)HookNavHover(child);
  }
  NavButton AddNav(string text,char glyph,Action click) {
   var button=new NavButton(text,glyph);
@@ -435,7 +453,6 @@ public class MainForm:Form {
  // Einstellungen (Zahnrad): Menü rechts über dem Knopf.
  readonly ContextMenuStrip settingsMenu=new ContextMenuStrip();
  void ShowSettingsMenu() {
-  CloseNav();
   NavButton current=viewTitle.Tag as NavButton??navPrograms;
   current.Selected=false;
   navMore.Selected=true; // ausgewählt, solange das Menü offen ist
@@ -467,7 +484,7 @@ public class MainForm:Form {
   settingsMenu.Closed+=closed;
   settingsMenu.Opened-=SettingsMenuOpened;
   settingsMenu.Opened+=SettingsMenuOpened;
-  settingsMenu.Show(navMore,new Point(navMore.Width+Ui.Px(4),navMore.Height),ToolStripDropDownDirection.AboveRight);
+  MenuStyle.ShowOnScreen(settingsMenu,navMore,new Point(navMore.Width+Ui.Px(4),navMore.Height),ToolStripDropDownDirection.AboveRight);
  }
  void SettingsMenuOpened(object sender,EventArgs e){MenuStyle.RoundCorners(settingsMenu);}
  void OpenFolder(string path) {
@@ -1153,7 +1170,7 @@ public class MainForm:Form {
   if(rowMenu.Items.Count>1)rowMenu.Items.Add(new ToolStripSeparator());
   rowMenu.Items.Add(MenuStyle.Item("Kanten je Programm …",'\uE9A6',(s,a)=>EditEdges()));
   rowMenu.Items.Add(MenuStyle.BottomSpacer());
-  rowMenu.Show(list,e.Location);
+  MenuStyle.ShowOnScreen(rowMenu,list,e.Location,ToolStripDropDownDirection.BelowRight);
  }
  // Fest eingebautes Programm ausblenden; gespeicherte Werte bleiben erhalten.
  void HideProgram(ProgramRow row) {
@@ -1430,7 +1447,7 @@ public class MainForm:Form {
   arrangementMenu.Items.Add(MenuStyle.TopSpacer());
   foreach(string n in names) {
    string name=n;
-   arrangementMenu.Items.Add(MenuStyle.Item(name,name==activeArrangement?'\uE73E':'\0',(s,a)=>SwitchArrangement(name)));
+   arrangementMenu.Items.Add(MenuStyle.Choice(name,name==activeArrangement,(s,a)=>SwitchArrangement(name)));
   }
   arrangementMenu.Items.Add(new ToolStripSeparator());
   arrangementMenu.Items.Add(MenuStyle.Item("Neue Anordnung …",'\uE710',(s,a)=>BeginInvoke((Action)NewArrangement)));
@@ -1444,7 +1461,7 @@ public class MainForm:Form {
   arrangementMenu.Items.Add(new ToolStripSeparator());
   arrangementMenu.Items.Add(MenuStyle.Item("Verknüpfung auf dem Desktop anlegen",'\uE71B',(s,a)=>CreateShortcut()));
   arrangementMenu.Items.Add(MenuStyle.BottomSpacer());
-  arrangementMenu.Show(arrangement,new Point(0,arrangement.Height));
+  MenuStyle.ShowOnScreen(arrangementMenu,arrangement,new Point(0,arrangement.Height),ToolStripDropDownDirection.BelowRight);
  }
  // Nach jeder Änderung: Sicht der aktiven Anordnung neu laden (Positionen, Kanten, Abstand).
  void ReloadArrangement() {

@@ -876,17 +876,17 @@ public class AlignRulesForm:FixedSizeForm {
   MenuStyle.Prepare(refMenu);
   refMenu.Items.Add(MenuStyle.TopSpacer());
   string current=refs[entry.Id][index];
-  refMenu.Items.Add(MenuStyle.Item("Bildschirmrand",current==null?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=null;UpdateRefLabel(entry.Id,index);UpdateCycles();}));
+  refMenu.Items.Add(MenuStyle.Choice("Bildschirmrand",current==null,(s,a)=>{refs[entry.Id][index]=null;UpdateRefLabel(entry.Id,index);UpdateCycles();}));
   refMenu.Items.Add(new ToolStripSeparator());
   string side=Directions[index]=="left"?"rechts neben":Directions[index]=="right"?"links neben":Directions[index]=="top"?"unter":"über";
   foreach(var other in programs) {
    if(other.Id==entry.Id)continue;
    var target=other;
    bool isCurrent=String.Equals(current,other.Id,StringComparison.OrdinalIgnoreCase);
-   refMenu.Items.Add(MenuStyle.Item(side+" "+other.Name,isCurrent?'\uE73E':'\0',(s,a)=>{refs[entry.Id][index]=target.Id;UpdateRefLabel(entry.Id,index);UpdateCycles();}));
+   refMenu.Items.Add(MenuStyle.Choice(side+" "+other.Name,isCurrent,(s,a)=>{refs[entry.Id][index]=target.Id;UpdateRefLabel(entry.Id,index);UpdateCycles();}));
   }
   refMenu.Items.Add(MenuStyle.BottomSpacer());
-  refMenu.Show(anchor,new Point(0,anchor.Height));
+  MenuStyle.ShowOnScreen(refMenu,anchor,new Point(0,anchor.Height),ToolStripDropDownDirection.BelowRight);
  }
  // Aktuelle Abstände des offenen Fensters in die Felder der angehakten Kanten übernehmen.
  void Measure(Entry entry) {

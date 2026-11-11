@@ -755,6 +755,35 @@ public static class MenuStyle {
   if(click!=null)item.Click+=click;
   return item;
  }
+ // Eintrag eines Auswahlfelds: der gewählte bekommt den Auswahlpunkt.
+ public static GlyphMenuItem Choice(string text,bool selected,EventHandler click) {
+  var item=Item(text,'\0',click);
+  item.Radio=selected;
+  return item;
+ }
+ // Menü auf den Arbeitsbereich des Bildschirms begrenzen, auf dem das Element liegt (Globale Richtlinien,
+ // Kontextmenüs bei mehreren Bildschirmen; Vorlage: Wake on LAN, MenuHelper.ShowOnScreen). Windows verschiebt
+ // Menüs sonst nur innerhalb des ganzen Desktops, dann ragen sie auf den Nachbarbildschirm.
+ public static void ShowOnScreen(ToolStripDropDown menu,Control owner,Point location,ToolStripDropDownDirection direction) {
+  var size=menu.GetPreferredSize(Size.Empty);
+  if(!menu.AutoSize||size.Width<=0||size.Height<=0)size=menu.Size;
+  var ownerRect=owner.RectangleToScreen(owner.ClientRectangle);
+  var area=Screen.FromRectangle(ownerRect).WorkingArea;
+  var p=owner.PointToScreen(location);
+  bool up=direction==ToolStripDropDownDirection.AboveRight||direction==ToolStripDropDownDirection.AboveLeft;
+  bool left=direction==ToolStripDropDownDirection.AboveLeft||direction==ToolStripDropDownDirection.BelowLeft||direction==ToolStripDropDownDirection.Left;
+  int x=left?p.X-size.Width:p.X;
+  int y=up?p.Y-size.Height:p.Y;
+  // Unten kein Platz: nach oben öffnen (bei Auswahlfeldern über dem Element statt darüber hinweg).
+  if(!up&&y+size.Height>area.Bottom)y=(location.Y>=owner.Height?ownerRect.Top:p.Y)-size.Height;
+  // Oben kein Platz: nach unten öffnen.
+  if(up&&y<area.Top)y=p.Y;
+  if(x+size.Width>area.Right)x=area.Right-size.Width;
+  if(x<area.Left)x=area.Left;
+  if(y+size.Height>area.Bottom)y=area.Bottom-size.Height;
+  if(y<area.Top)y=area.Top;
+  menu.Show(owner,owner.PointToClient(new Point(x,y)),ToolStripDropDownDirection.BelowRight);
+ }
  // Unsichtbare Leerzeilen: oben 4 × Skalierung, unter dem letzten Eintrag 6 × Skalierung.
  public static ToolStripItem TopSpacer(){return new MenuSpacer(K(4));}
  public static ToolStripItem BottomSpacer(){return new MenuSpacer(K(6));}
@@ -802,6 +831,8 @@ public static class MenuStyle {
 }
 public class GlyphMenuItem:ToolStripMenuItem {
  public Image Glyph;
+ // Auswahlpunkt (Auswahlfelder, Globale Richtlinien): gefüllter Punkt in Akzentfarbe vor dem gewählten Eintrag.
+ public bool Radio;
  // Feste Zeilenhöhe (0 = Windows entscheidet).
  public int FixedHeight;
  public GlyphMenuItem(string text):base(text){}
@@ -856,12 +887,17 @@ public class MenuRenderer:ToolStripRenderer {
   int y=(int)Math.Round((e.Item.Height-tr.Height)/2f-shift);
   e.TextRectangle=new Rectangle(tr.X,y,tr.Width,tr.Height);
   var item=e.Item as GlyphMenuItem;
-  if(item!=null&&item.Glyph!=null&&e.Text==item.Text) {
+  if(item!=null&&(item.Glyph!=null||item.Radio)&&e.Text==item.Text) {
    float cy=TextVisualCenter(e.Graphics,f,e.TextRectangle);
    int margin;
    if(item.Owner==null||!marginWidth.TryGetValue(item.Owner,out margin))margin=(int)K(36);
    float cx=margin/2f+K(2);
-   e.Graphics.DrawImage(item.Glyph,(float)Math.Round(cx-item.Glyph.Width/2f),(float)Math.Round(cy-item.Glyph.Height/2f),item.Glyph.Width,item.Glyph.Height);
+   if(item.Radio) {
+    // Auswahlpunkt wie Wake on LAN: Durchmesser 8 × Skalierung, an der Textmitte ausgerichtet.
+    float d=K(8);
+    e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
+    using(var brush=new SolidBrush(Ui.Accent)) e.Graphics.FillEllipse(brush,cx-d/2,cy-d/2,d,d);
+   } else e.Graphics.DrawImage(item.Glyph,(float)Math.Round(cx-item.Glyph.Width/2f),(float)Math.Round(cy-item.Glyph.Height/2f),item.Glyph.Width,item.Glyph.Height);
   }
   e.TextColor=e.Item.Enabled?MenuStyle.TextColor:MenuStyle.Muted;
   e.TextFormat|=TextFormatFlags.EndEllipsis;
