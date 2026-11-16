@@ -910,11 +910,14 @@ public class FooterPanel:Control {
    Size s1=TextRenderer.MeasureText(g,Name1,f1,Size.Empty,flags);
    Size s2=TextRenderer.MeasureText(g,Name2,f2,Size.Empty,flags);
    int tw=Math.Max(s1.Width,s2.Width);
-   int th=s1.Height+Ui.Px(2)+s2.Height;
+   // Globale Richtlinien (Footer, 16.11.2026): Zeilen um 3 × Skalierung überlappen, weil die mit NoPadding
+   // gemessene Höhe Leerraum für Ober- und Unterlängen enthält; sonst wirkt der Textblock höher als das Logo.
+   int gap=-Ui.Px(3);
+   int th=s1.Height+gap+s2.Height;
    int top=(Height-th)/2;
    int tx=right-tw;
    TextRenderer.DrawText(g,Name1,f1,new Point(tx,top),Ui.TextColor,flags);
-   TextRenderer.DrawText(g,Name2,f2,new Point(tx,top+s1.Height+Ui.Px(2)),hover?Ui.Accent:Ui.Muted,flags);
+   TextRenderer.DrawText(g,Name2,f2,new Point(tx,top+s1.Height+gap),hover?Ui.Accent:Ui.Muted,flags);
    link=new Rectangle(tx,top,tw,th);
    if(Logo!=null) {
     int lh=Ui.Px(26);
