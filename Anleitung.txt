@@ -1,11 +1,13 @@
 ﻿FENSTERPOSITIONEN
 ================
-Version 2.50 (Build-Datum wird angehängt, z.B. 2.50.2026.1111)
+Version 2.63 (Build-Datum wird angehängt, z.B. 2.63.2026.1116)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
-Werte verwendet, solange noch keine eigenen Positionen gespeichert sind.
-Ohne Startwerte (z.B. nur die EXE aus GitHub) beginnt das Programm leer:
-dann zuerst die Fenster anordnen und "Positionen speichern" anklicken.
+Werte (Programmliste und Positionen) verwendet, solange noch keine eigenen
+Positionen gespeichert sind.
+Ohne Startwerte (z.B. nur die EXE aus GitHub) beginnt das Programm mit
+leerer Liste: Programme über "Programm hinzufügen" aufnehmen oder
+exportierte Einstellungen importieren, dann "Positionen speichern" anklicken.
 Benötigt Windows mit .NET Framework 4.x (in Windows 10 und 11 enthalten).
 
 Navigation
@@ -17,8 +19,8 @@ Links im Fenster steht die Navigation:
 - Einmalig ausrichten: beliebiges offenes Fenster anklicken oder aus der
   Liste wählen und ausrichten.
 - Einstellungen (unten, Zahnrad): Menü mit "Sicherungen öffnen",
-  "Protokolle öffnen", "Anleitung öffnen", "Ausgeblendete wieder anzeigen"
-  und "Info über Fensterpositionen".
+  "Protokolle öffnen", "Anleitung öffnen", "Ausgeblendete wieder anzeigen",
+  "Einstellungen exportieren/importieren" und "Info über Fensterpositionen".
 ☰ klappt die Navigation ein (nur Symbole) bzw. aus. Die Stecknadel pinnt
 sie an: angepinnt bleibt sie offen und schiebt den Inhalt (Standard), sonst
 klappt sie über dem Inhalt aus (auch, wenn die Maus kurz darauf verweilt)
@@ -34,7 +36,7 @@ Anordnungen
 Rechts neben "Positionen speichern" steht die aktive Anordnung (Standard:
 "Standard"). Jede Anordnung hat eigene gespeicherte Positionen, eigene Kanten
 je Programm und einen eigenen Abstand, z.B. "Arbeit" und "Spielen".
-Eigene Programme, ausgeblendete Programme, Navigation und Update-Einstellungen
+Programmliste, ausgeblendete Programme, Navigation und Update-Einstellungen
 gelten für alle Anordnungen.
 Das Menü der Anordnung bietet:
 - die Anordnungen zum Umschalten (Haken = aktiv),
@@ -122,7 +124,7 @@ anklicken. Alte Datenbanksicherungen im Ordner Sicherungen bleiben erhalten.
 Speicherorte
 Einstellungsordner (ab Version 2.13):
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen
-Eigene Positionen (auch die Liste der eigenen Programme):
+Eigene Positionen und Programmliste:
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen\Positionen.json
 Sicherungen:
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen\Sicherungen
@@ -388,23 +390,154 @@ das Fenster dann aus dem Bildschirm, wird es hineingeschoben.
 Easy2Sync merkt sich deren Position beim Schließen selbst. Ist das Fenster gerade nicht offen, bleibt es
 unverändert; dann beim nächsten Mal mit offenem Fenster erneut klicken.
 
-Programme ausblenden
---------------------
-Fest eingebaute Programme (Task-Manager, DU Meter, Franz, TeamSpeak 3/6,
-Discord, Easy2Sync, GPU-Z), die auf dem Rechner nicht installiert sind und
-nicht laufen, erscheinen nicht in der Liste (steht beim Start im Protokoll).
+Programmliste (ab 2.52)
+-----------------------
+Alle Programme stehen in Positionen.json unter "_programme"; im Programm
+selbst ist keine Programmliste mehr eingebaut (bis 2.51 waren Task-Manager,
+DU Meter, Franz, TeamSpeak 3/6, Discord, Easy2Sync und GPU-Z fest
+eingebaut). Beim ersten Start von 2.52 wird die Liste einmalig angelegt:
+aus "_programme" in Resources\Startwerte.json (falls vorhanden) und den
+eigenen Programmen (bisher "_custom"). Vorher wird Positionen.json in den
+Ordner Sicherungen kopiert ("vor-Programmliste-Positionen.json").
+Gespeicherte Positionen, Kanten, Anordnungen und ausgeblendete Programme
+bleiben unverändert. Fehlte Startwerte.json dabei, lassen sich Programme
+und Positionen nachträglich mit "Einstellungen importieren …" aus der
+Startwerte.json übernehmen (ersetzt die bisherigen Einstellungen).
+Danach gilt nur noch diese Liste; sie lässt sich bearbeiten, z.B. um einen
+Pfad zu ändern oder ein Programm mit Einstellungsdatei aufzunehmen.
+Ein Eintrag:
+  Id              eindeutiger Name, z.B. "discord" (nicht mit _ beginnend)
+  Name            Anzeige in der Liste
+  ProcessName     Prozess ohne .exe; AltProcessName: zweiter Prozessname
+  Exe, Args       Programmdatei (zum Starten) und Startparameter
+  File + Keys     Position steht in einer JSON-Datei des Programms (Felder)
+  RegistryPath + Keys
+                  Position steht in der Registry (HKEY_CURRENT_USER, Werte)
+                  ohne File/RegistryPath: Fenster wird direkt gemessen und
+                  verschoben (wie bei "Programm hinzufügen")
+  DefaultEdges    Vorgabe für "Kanten je Programm": top, bottom, left,
+                  right, hcenter, vcenter
+  CenterOthers    true: weitere Fenster mittig über dem Hauptfenster
+                  (Easy2Sync)
+  RestartService  Dienst nach Ändern/Wiederherstellen neu starten (DU Meter:
+                  DUMeterSvc)
+  EndTask         geplante Aufgabe vor dem Beenden stoppen (Task-Manager:
+                  "Task Manager starten")
+  Group           Gruppe in der Programmliste (leer = ohne Gruppe)
+  WindowTitle     nur das Fenster mit diesem Titel (sonst eines, das ihn
+                  enthält); leer = Hauptfenster des Programms
+Pfade stehen mit Platzhaltern ohne Benutzernamen, z.B. %LOCALAPPDATA%,
+%APPDATA%, %ProgramFiles%, %ProgramFiles(x86)%, %WINDIR%. Die Datei nur
+bearbeiten, während das Programm geschlossen ist; ungültige Einträge (ohne
+Id oder ProcessName) werden übergangen.
+
+Einstellungen exportieren und importieren
+-----------------------------------------
+Navigation > Einstellungen > "Einstellungen exportieren …" speichert die ganze
+Positionen.json als JSON-Datei: Programmliste, gespeicherte Positionen, Kanten
+je Programm, alle Anordnungen, ausgeblendete Programme, Navigation und
+Update-Einstellungen (z.B. als Sicherung oder für einen anderen PC).
+"Einstellungen importieren …" ersetzt nach einer Rückfrage ("Nein" ist
+vorausgewählt) alle Einstellungen durch eine solche Datei. Die bisherige
+Positionen.json wird vorher im Ordner Sicherungen abgelegt
+("vor-Import-Positionen.json"), danach startet das Programm neu.
+Importieren lassen sich auch eine Positionen.json, eine Startwerte.json oder
+Dateien älterer Versionen (die Programmliste wird dann wie beim Update
+angelegt).
+
+Gruppen
+-------
+Programme lassen sich in Gruppen ordnen, z.B. "Kommunikation" (Discord,
+TeamSpeak) und "System" (Task-Manager, DU Meter). Programme ohne Gruppe
+stehen oben, darunter je Gruppe eine Überschriftzeile (bündig mit den
+Programmen ohne Gruppe) mit Kästchen, Name, Anzahl der Programme und rechts
+dem Pfeil zum Ein-/Ausklappen; die Programme der Gruppe sind eingerückt.
+- In eine Gruppe: Rechtsklick auf das Programm > "Gruppe …" > Gruppe wählen,
+  "Neue Gruppe …" oder "Ohne Gruppe"; oder das Programm unter die
+  Überschrift bzw. zwischen die Programme einer Gruppe ziehen.
+- Klick auf die Überschrift (oder Pfeil links/rechts) klappt die Gruppe
+  ein bzw. aus; das Kästchen hakt alle Programme der Gruppe an oder ab
+  (Strich = nur einige angehakt). Eingeklappte Programme bleiben angehakt
+  und werden mit bearbeitet.
+- Gruppen verschieben: die Überschrift mit der Maus an eine andere Stelle
+  ziehen (die Gruppe wandert mit allen Programmen) oder Strg+Pfeil
+  hoch/runter auf der Überschrift. Programme ohne Gruppe bleiben oben.
+- Rechtsklick auf die Überschrift: "Gruppe … umbenennen …", "Gruppe …
+  auflösen" (die Programme bleiben, nur ohne Gruppe), "Alle Gruppen
+  einklappen/ausklappen".
+Gruppen und eingeklappte Gruppen gelten für alle Anordnungen; gespeichert in
+der Programmliste ("Group") und unter "_gruppenzu".
+
+Reihenfolge
+-----------
+Programme lassen sich in der Liste mit der Maus an eine andere Stelle ziehen
+(eine Linie in Akzentfarbe zeigt die Einfügestelle, Esc bricht ab) oder mit
+Strg+Pfeil hoch/runter verschieben. Sortieren nach Name (Rechtsklick):
+- auf eine Gruppenüberschrift oder ein Programm einer Gruppe: "Gruppe …
+  nach Name sortieren" ordnet nur diese Gruppe,
+- auf ein Programm ohne Gruppe: "Programme ohne Gruppe nach Name sortieren",
+- "Alle Gruppen einzeln nach Name sortieren" (ohne Gruppen: "Nach Name
+  sortieren") ordnet die Programme innerhalb jeder Gruppe.
+Die Reihenfolge der Gruppen selbst bleibt dabei immer, wie sie ist. Die Reihenfolge wird sofort
+in der Programmliste ("_programme") gespeichert und gilt für alle
+Anordnungen; ausgeblendete Programme behalten ihren Platz.
+
+In "Kanten je Programm" sortiert ein Klick auf die Spaltenüberschrift
+"Programm" die Tabelle nach Name (A–Z, Z–A) bzw. wieder in die Reihenfolge
+der Programmliste; das ändert nichts an den Einstellungen.
+
+Programme mit mehreren Fenstern (z.B. Steam)
+--------------------------------------------
+Manche Programme haben mehrere eigenständige Fenster desselben Prozesses,
+z.B. Steam: Hauptfenster und Freundesliste gehören beide zu
+steamwebhelper.exe. Dann jedes Fenster einzeln aufnehmen:
+1. Steam und die Freundesliste öffnen, "Programm hinzufügen" wählen und
+   oben in die Suche "Steam" bzw. "steamwebhelper" eingeben.
+2. Das Fenster "Steam" wählen; "Nur das Fenster „Steam“" ist schon
+   angehakt (die Liste zeigt "mehrere Fenster"). Hinzufügen.
+3. Ebenso das Fenster "Freunde" (bzw. wie es bei dir heißt) hinzufügen.
+4. In "Kanten je Programm" das Hauptfenster wie gewohnt ausrichten, bei der
+   Freundesliste z.B. Links "an Steam" mit Abstand 0 sowie Oben und Unten
+   wie beim Hauptfenster: Sie sitzt dann direkt rechts daneben und ist
+   gleich hoch, wie angedockt.
+Gespeichert wird der Fenstertitel ("WindowTitle"); gesucht wird erst nach
+genau diesem Titel, sonst nach einem Titel, der ihn enthält. Ohne passendes
+Fenster wird nichts verschoben. Ändert ein Programm seinen Titel ständig
+(z.B. mit Dateinamen), den Haken nicht setzen.
+"Einmalig ausrichten" listet ebenfalls alle Fenster eines Programms.
+Steht ein Programm schon ohne Fenstertitel in der Liste, zeigt "Programm
+hinzufügen" seine Fenster mit dem Hinweis "schon in der Liste – nur mit
+Fenstertitel"; sie lassen sich dann nur als einzelnes Fenster aufnehmen.
+
+Programm umbenennen
+-------------------
+Rechtsklick auf ein Programm > "… umbenennen …" ändert den Namen in der
+Liste, z.B. "Epic Games Launcher" in "Epic". Gespeicherte Positionen, Kanten,
+Nachbarbezüge und Gruppe bleiben erhalten (sie hängen an der Id, nicht am
+Namen). Zwei Programme dürfen nicht denselben Namen haben.
+
+Programme ausblenden und entfernen
+----------------------------------
+Programme, deren Programmdatei fehlt und die nicht laufen, erscheinen nicht
+in der Liste (steht beim Start im Protokoll).
 Installierte, aber nicht benötigte Programme: Rechtsklick auf die Zeile >
 "… ausblenden". Gespeicherte Positionen bleiben dabei erhalten.
 Wieder anzeigen: Rechtsklick in die Liste > "Ausgeblendete wieder anzeigen"
 (auch unter Navigation > Einstellungen).
 Die Auswahl wird in Positionen.json gespeichert (_hidden).
+Rechtsklick > "… entfernen …" löscht das Programm (nach Rückfrage) aus der
+Programmliste, dazu seine gespeicherte Position und Kanten in der aktiven
+Anordnung. Das Programm selbst bleibt unverändert. Zurückholen: Programm neu
+hinzufügen oder exportierte Einstellungen importieren.
 
 Eigene Programme hinzufügen
 ---------------------------
 Über "Programm hinzufügen" (oben rechts in der Programmliste) lässt sich
 jedes geöffnete Fenster aufnehmen, z.B. Browser, Explorer-Programme oder Tools.
 1. Das Programm öffnen und sein Fenster an die gewünschte Stelle schieben.
-2. "Programm hinzufügen" anklicken: Die Seite listet die offenen Fenster.
+2. "Programm hinzufügen" anklicken: Die Seite listet die offenen Fenster;
+   das Suchfeld oben filtert nach Fenstertitel, Programm (.exe) oder
+   Beschreibung (Pfeiltasten wählen, Enter fügt hinzu).
    Fenster auswählen, bei Bedarf den Namen ändern, dann "Hinzufügen"
    ("Abbrechen" führt ohne Änderung zurück zur Programmliste).
    Die aktuelle Position und Größe werden dabei gleich gespeichert.
@@ -415,9 +548,8 @@ Programmpfad bekannt ist) und das Fenster danach gesetzt.
 Ausrichten gilt auch für eigene Programme; ihre Kanten legst du unter
 "Kanten je Programm" fest (Vorgabe: keine, frei wählbar).
 Erkannt wird das Programm am Prozessnamen (z.B. notepad.exe); es wird sein
-Hauptfenster verwendet. In der Liste steht hinter dem Namen "Eigenes".
-Entfernen: Rechtsklick auf die Zeile > "… entfernen". Dabei wird auch die
-gespeicherte Position gelöscht; das Programm selbst bleibt unverändert.
+Hauptfenster verwendet. Das Programm kommt ans Ende der Programmliste.
+Ausblenden und entfernen wie bei allen Programmen (siehe oben).
 Programme mit Administratorrechten erscheinen ohne Programmpfad; sie werden
 dann nicht automatisch gestartet. Zum Verschieben solcher Fenster
 "Als Administrator" verwenden.
@@ -467,15 +599,28 @@ Fensterpositionen fragt die neueste Version auf GitHub ab
 (github.com/WestMc002/Fensterpositionen-wiederherstellen, Releases).
 Dabei wird nur die öffentliche Release-Liste gelesen; es werden keine
 Daten übertragen und keine Anmeldung gebraucht.
-- Beim Start wird still geprüft, höchstens einmal täglich. Abschaltbar im
-  Info-Fenster mit dem Schalter "Automatisch prüfen".
+- Kurz nach jedem Start (ca. 15 Sekunden) wird still geprüft. Abschaltbar im
+  Info-Fenster mit dem Schalter "Automatisch prüfen". Beim Wiederherstellen
+  per Verknüpfung wird nicht geprüft.
 - Im Info-Fenster zeigt die Zeile "Updates" den Stand mit Symbol (Aktuell,
-  Version x verfügbar, Prüfung nicht möglich, Noch nicht geprüft) und
-  darunter das Datum der letzten Prüfung. Der Knopf rechts heißt
-  "Jetzt prüfen", bei einer neuen Version "Aktualisieren" (schließt das
-  Info-Fenster und startet das Update) bzw. im Projektordner
-  "Release-Seite". Das Ergebnis einer Prüfung von Hand steht nur dort; im
-  Hauptfenster erscheint nur bei einer neuen Version der Hinweis.
+  Version x verfügbar, Nur Vorabversionen, Prüfung nicht möglich, Noch nicht
+  geprüft) und darunter kurz das Datum der letzten Prüfung bzw. den Grund
+  ("Nicht erreichbar.", "Keine Verbindung.", "Keine Antwort.", "Zu viele
+  Anfragen.", "Antwort unlesbar."). Ein Klick auf "Details" klappt den
+  technischen Originaltext auf (markier- und kopierbar), "Weniger" klappt ihn
+  wieder zu. Der Knopf rechts heißt "Jetzt prüfen", bei einer neuen Version
+  "Aktualisieren" (schließt das Info-Fenster und startet das Update) bzw. im
+  Projektordner "Release-Seite". Das Ergebnis einer Prüfung von Hand steht
+  nur dort; im Hauptfenster erscheint nur bei einer neuen Version der Hinweis.
+- "Automatisch aktualisieren" (Info-Fenster, Standard aus, nur zusammen mit
+  "Automatisch prüfen"): Findet die Prüfung beim Start eine neue Version,
+  wird sie ohne Rückfrage installiert, sobald Fensterpositionen nicht
+  beschäftigt ist (kein laufendes Wiederherstellen/Speichern, keine
+  ungespeicherten Änderungen bei "Kanten je Programm", kein Dialog offen) –
+  sonst alle 5 Minuten ein neuer Versuch. Fensterpositionen startet danach von
+  selbst neu. Liegt das Programm unter "Programme", fragt Windows bei jedem
+  Update nach Administratorrechten. Schlägt es fehl, bleibt der Hinweis oben
+  und das Info-Fenster zeigt den Grund.
 - Gibt es eine neuere Version, erscheint oben im Hauptfenster ein Hinweis:
   "Jetzt aktualisieren" lädt das ZIP, beendet Fensterpositionen, ersetzt EXE
   und Anleitung und startet das Programm neu. Gespeicherte Positionen und
@@ -525,6 +670,34 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.52 bis 2.63  Programmliste in Positionen.json ("_programme"): keine fest
+               eingebauten Programme mehr; die Liste wird beim ersten Start
+               aus Resources\Startwerte.json und den eigenen Programmen
+               angelegt (vorher Sicherung). Sonderfälle als Angaben
+               (DefaultEdges, CenterOthers, RestartService, EndTask). Neu:
+               "Einstellungen exportieren/importieren" (ganze Positionen.json
+               mit Positionen und Anordnungen); jedes Programm lässt
+               sich ausblenden oder entfernen. Programmliste flacher
+               (Zeilen 32 statt 42, bis zu 16 Programme ohne Bildlauf),
+               ebenso "Kanten je Programm" (Zeilen 50 statt 64, bis zu 10).
+               Reihenfolge per Ziehen, Strg+Pfeil oder nach Name sortieren
+               (einzelne Gruppe oder jede Gruppe für sich).
+               Gruppen: Überschriftzeilen zum Ein-/Ausklappen und An-/Abhaken
+               aller Programme der Gruppe; Zuordnung per Rechtsklick oder Ziehen;
+               Gruppen per Ziehen der Überschrift oder Strg+Pfeil verschieben.
+               Fenstertitel ("WindowTitle"): mehrere Fenster eines Programms
+               getrennt aufnehmen (z.B. Steam und Freundesliste); "Programm
+               hinzufügen" und "Einmalig ausrichten" zeigen alle Fenster.
+               "Programm hinzufügen" mit Suchfeld (Titel, Programm,
+               Beschreibung; Pfeiltasten wählen, Enter fügt hinzu).
+               Programme umbenennen (Rechtsklick).
+               "Kanten je Programm": Klick auf "Programm" sortiert nach Name.
+2.51           Updates wie in allen Programmen: Prüfung kurz nach jedem Start
+               (ohne Tagessperre), neuer Schalter "Automatisch aktualisieren"
+               (Standard aus). Info-Fenster: Zeile "Updates" neu aufgebaut,
+               kurze Fehlermeldungen mit aufklappbaren "Details", "Nur
+               Vorabversionen" gilt nicht als Fehler.
+               Tooltips so schmal wie nötig.
 2.50           Navigation: nicht angepinnt klappt sie aus, wenn die Maus kurz
                (ca. 0,4 s) darauf verweilt; bleibt offen, solange das Menü
                "Einstellungen" offen ist.

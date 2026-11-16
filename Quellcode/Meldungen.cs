@@ -239,6 +239,20 @@ public class ModernToolTip:ToolTip {
    using(var g=Graphics.FromHwnd(IntPtr.Zero)) {
     k=g.DpiX/96f;
     size=TextRenderer.MeasureText(g,text,TipFont,new Size((int)(400*k),0),Flags);
+    // Mit Umbruch zählt Windows das Leerzeichen am Zeilenende mit: kleinste Breite mit gleicher Höhe suchen
+    // (Binärsuche, Untergrenze = breitestes Wort; Vorlage: Sync Pilot ab 1.84).
+    int line=TextRenderer.MeasureText(g,"Ag",TipFont,Size.Empty,Flags).Height;
+    if(size.Height>line) {
+     int low=1;
+     foreach(string word in text.Split(new[]{' ','\r','\n'},StringSplitOptions.RemoveEmptyEntries))
+      low=Math.Max(low,TextRenderer.MeasureText(g,word,TipFont,Size.Empty,Flags|TextFormatFlags.SingleLine).Width);
+     int high=size.Width;
+     while(low<high) {
+      int mid=(low+high)/2;
+      if(TextRenderer.MeasureText(g,text,TipFont,new Size(mid,0),Flags).Height<=size.Height)high=mid;else low=mid+1;
+     }
+     size=new Size(high,size.Height);
+    }
    }
    // 1 px Reserve, damit beim Zeichnen nichts anders umbricht als beim Messen.
    e.ToolTipSize=new Size(size.Width+1+2*(int)(PadX*k),size.Height+2*(int)(PadY*k));

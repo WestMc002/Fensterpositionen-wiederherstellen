@@ -41,7 +41,8 @@ public class AboutForm:FixedSizeForm {
   string local=Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
   if(root.StartsWith(local,StringComparison.OrdinalIgnoreCase))root="%LOCALAPPDATA%"+root.Substring(local.Length);
   var lines=new[]{new[]{"Entwickler","Günther Schoder"},new[]{"Erstellt",built},new[]{"Farbschema",(Ui.Dark?"dunkel":"hell")+" (folgt Windows)"},new[]{"Positionen",root}};
-  int lineH=Ui.Px(26),updateH=updates!=null?Ui.Px(60)+Ui.Px(32):0,cardH=lines.Length*lineH+Ui.Px(24)+updateH;
+  // Updates: "Updates" (49), "Automatisch prüfen" (32) und ggf. "Automatisch aktualisieren" (32).
+  int lineH=Ui.Px(26),updateH=updates!=null?Ui.Px(49)+Ui.Px(32)+(updates.AutoInstall!=null?Ui.Px(32):0):0,cardH=lines.Length*lineH+Ui.Px(24)+updateH;
   var card=new Card{Bounds=new Rectangle(pad,y,w-2*pad,cardH),Padding=new Padding(0)};
   for(int i=0;i<lines.Length;i++) {
    card.Controls.Add(new Label{Text=lines[i][0],Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,AutoEllipsis=true,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),Ui.Px(12)+i*lineH,Ui.Px(96),lineH)});
@@ -73,69 +74,159 @@ public class AboutForm:FixedSizeForm {
   y+=Ui.Px(22)+Ui.Px(18);
   ClientSize=new Size(w,y);
  }
- // Updates (Globale Richtlinien): Zeile "Updates" 60 hoch mit Symbol, Stand, "Zuletzt geprüft …" und Knopf,
- // darunter 32 hoch "Automatisch prüfen" mit Schalter.
- static Font detailFont,smallGlyphFont;
- GlyphView statusGlyph;Label statusText,statusDetail;ModernButton statusButton;
+ // Updates (Globale Richtlinien, Abschnitt "Updates" › Anzeige; Referenz: Wake on LAN ab v1.65, AboutDialog.AddUpdateRows):
+ // Zeile "Updates" im Raster der Zeilen darüber (Symbol, Überschrift, kurze zweite Zeile, bei Fehlern aufklappbare
+ // "Details"), Knopf rechts neben beiden Zeilen; zwei Zeilenabstände tiefer "Automatisch prüfen", darunter
+ // "Automatisch aktualisieren". uy = Beginn der Zeile, X0 = Beginn der Werte.
+ static Font titleFont,detailFont,smallGlyphFont;
+ GlyphView statusGlyph;Label statusText,statusDetail,moreLink;ModernButton statusButton;
+ Panel moreBox;TextBox moreText;
  UpdateHooks hooks;Card updateCard;
+ readonly List<Control> belowDetails=new List<Control>();
+ ToolTip updateTips;
+ int uy,boxHeight;
+ string moreValue="";
+ bool moreOpen;
  enum ButtonMode {Check,Install,Page}
  ButtonMode mode;
+ int X0{get{return Ui.Px(112);}}
+ int ValuesRight{get{return updateCard.Width-Ui.Px(16);}}
+ const TextFormatFlags OneLine=TextFormatFlags.NoPadding|TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix;
  void AddUpdateRows(Card card,int top,UpdateHooks updates) {
-  hooks=updates;updateCard=card;
+  hooks=updates;updateCard=card;uy=top;
+  if(titleFont==null)titleFont=new Font("Segoe UI",9.5f);
   if(detailFont==null)detailFont=new Font("Segoe UI",8.75f);
   if(smallGlyphFont==null&&Ui.IconFont!=null)smallGlyphFont=new Font(Ui.IconFont.FontFamily,10f);
-  int y1=top+Ui.Px(9),y2=top+Ui.Px(33),lineH=Ui.Px(22);
-  card.Controls.Add(new Label{Text="Updates",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),y1,Ui.Px(96),lineH)});
-  statusGlyph=new GlyphView{BackColor=Ui.Surface,Bounds=new Rectangle(Ui.Px(110),y1,Ui.Px(20),lineH)};
-  statusButton=new ModernButton("Jetzt prüfen",ButtonKind.Secondary,"\uE72C"){Height=Ui.Px(30),Margin=new Padding(0),GlyphFont=smallGlyphFont};
-  statusText=new Label{Font=Ui.SmallFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft};
-  statusText.Location=new Point(Ui.Px(136),y1);statusText.Height=lineH;
-  statusDetail=new Label{Font=detailFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(136),y2,card.Width-Ui.Px(136)-Ui.Px(16),Ui.Px(20))};
+  updateTips=new ModernToolTip();
+  card.Controls.Add(new Label{Text="Updates",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(16),uy+Ui.Px(2),Ui.Px(96),Ui.Px(22))});
+  statusGlyph=new GlyphView{BackColor=Ui.Surface,Bounds=new Rectangle(X0,uy+Ui.Px(2),Ui.Px(20),Ui.Px(22))};
+  statusText=new Label{Font=titleFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft};
+  statusDetail=new Label{Font=detailFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.TopLeft};
+  moreLink=new Label{Text="Details",Font=detailFont,ForeColor=Ui.Accent,BackColor=Ui.Surface,UseMnemonic=false,TextAlign=ContentAlignment.TopLeft,Cursor=Cursors.Hand,Visible=false};
+  moreLink.Click+=(s,e)=>SetDetailsOpen(!moreOpen);
+  // Aufgeklapptes Feld mit dem technischen Originaltext (markier- und kopierbar), kein Pop-up.
+  moreBox=new Panel{BackColor=Ui.Bg,Visible=false,Padding=new Padding(Ui.Px(8),Ui.Px(6),Ui.Px(8),Ui.Px(6))};
+  moreText=new TextBox{Multiline=true,ReadOnly=true,WordWrap=true,BorderStyle=BorderStyle.None,BackColor=Ui.Bg,ForeColor=Ui.TextColor,Font=detailFont,Dock=DockStyle.Fill,TabStop=false};
+  moreBox.Controls.Add(moreText);
+  statusButton=new ModernButton("Jetzt prüfen",ButtonKind.Secondary,""){Height=Ui.Px(30),Margin=new Padding(0),GlyphFont=smallGlyphFont};
   statusButton.Click+=async(s,e)=>await StatusButtonClick();
-  card.Controls.Add(statusGlyph);card.Controls.Add(statusText);card.Controls.Add(statusDetail);card.Controls.Add(statusButton);
-  // Knopf vor die volle Breite der zweiten Zeile legen, sonst verdeckt sie seinen unteren Rand.
+  foreach(Control c in new Control[]{statusGlyph,statusText,statusDetail,moreLink,moreBox,statusButton})card.Controls.Add(c);
   statusButton.BringToFront();
-  // Zweite Zeile: nur "Automatisch prüfen", bündig mit den Werten; Schalter rechtsbündig mit dem Knopf.
-  int top2=top+Ui.Px(60);
+  // "Automatisch prüfen": Text ab X0, Schalter rechtsbündig; Klick auf den Text schaltet um.
+  int autoTop=uy+Ui.Px(49);
   var toggle=new ToggleSwitch{Checked=updates.Auto(),BackColor=Ui.Surface};
-  toggle.Location=new Point(card.Width-Ui.Px(16)-toggle.Width,top2+(Ui.Px(32)-toggle.Height)/2);
+  toggle.Location=new Point(ValuesRight-toggle.Width,autoTop+(Ui.Px(32)-toggle.Height)/2);
   toggle.CheckedChanged+=(s,e)=>updates.SetAuto(toggle.Checked);
-  var autoText=new Label{Text="Automatisch prüfen",Font=Ui.SmallFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,Cursor=Cursors.Hand,TextAlign=ContentAlignment.MiddleLeft,Bounds=new Rectangle(Ui.Px(112),top2,toggle.Left-Ui.Px(120),Ui.Px(32))};
+  var autoText=new Label{Text="Automatisch prüfen",Font=Ui.SmallFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,Cursor=Cursors.Hand,TextAlign=ContentAlignment.MiddleLeft,AutoEllipsis=true,Bounds=new Rectangle(X0,autoTop,toggle.Left-Ui.Px(8)-X0,Ui.Px(32))};
   autoText.Click+=(s,e)=>toggle.Checked=!toggle.Checked;
   card.Controls.Add(autoText);card.Controls.Add(toggle);
+  belowDetails.Add(autoText);belowDetails.Add(toggle);
+  // "Automatisch aktualisieren": direkt darunter, nur bedienbar, wenn "Automatisch prüfen" an ist.
+  if(updates.AutoInstall!=null) {
+   int instTop=autoTop+Ui.Px(32);
+   var inst=new ToggleSwitch{Checked=updates.AutoInstall(),BackColor=Ui.Surface};
+   inst.Location=new Point(ValuesRight-inst.Width,instTop+(Ui.Px(32)-inst.Height)/2);
+   inst.CheckedChanged+=(s,e)=>{if(updates.SetAutoInstall!=null)updates.SetAutoInstall(inst.Checked);};
+   var instText=new Label{Text="Automatisch aktualisieren",Font=Ui.SmallFont,ForeColor=Ui.TextColor,BackColor=Ui.Surface,TextAlign=ContentAlignment.MiddleLeft,AutoEllipsis=true,Bounds=new Rectangle(X0,instTop,inst.Left-Ui.Px(8)-X0,Ui.Px(32))};
+   instText.Click+=(s,e)=>{if(inst.Enabled)inst.Checked=!inst.Checked;};
+   string tip="Eine neue Version ohne Rückfrage installieren, sobald "+AppInfo.Product+" nicht beschäftigt ist. "+AppInfo.Product+" startet danach von selbst neu.";
+   updateTips.SetToolTip(inst,tip);updateTips.SetToolTip(instText,tip);
+   Action sync=()=>{
+    inst.Enabled=toggle.Checked;
+    instText.ForeColor=toggle.Checked?Ui.TextColor:Ui.Blend(Ui.Muted,Ui.Surface,0.4f);
+    instText.Cursor=toggle.Checked?Cursors.Hand:Cursors.Default;
+   };
+   toggle.CheckedChanged+=(s,e)=>sync();
+   sync();
+   card.Controls.Add(instText);card.Controls.Add(inst);
+   belowDetails.Add(instText);belowDetails.Add(inst);
+  }
   ShowStatus(updates.Status());
+ }
+ // Knopf rechtsbündig neben beiden Zeilen (Oberkante uy + 8); zweite Zeile endet vor dem Knopf,
+ // zu lange Texte mit "…" gekürzt (ganzer Text im Tooltip); "Details" etwa ein Leerzeichen hinter dem Text.
+ void LayoutStatus() {
+  statusButton.Location=new Point(ValuesRight-statusButton.Width,uy+Ui.Px(8));
+  int tx=X0+Ui.Px(23);
+  int limit=Math.Max(Ui.Px(40),statusButton.Left-Ui.Px(6)-tx);
+  statusText.SetBounds(tx,uy+Ui.Px(2),limit,Ui.Px(22));
+  int linkW=moreLink.Visible?TextRenderer.MeasureText(moreLink.Text,detailFont,Size.Empty,OneLine).Width+Ui.Px(2):0;
+  int textW=statusDetail.Text.Length==0?0:TextRenderer.MeasureText(statusDetail.Text,detailFont,Size.Empty,OneLine).Width;
+  int room=(moreLink.Visible?limit-linkW-Ui.Px(3):limit)-Ui.Px(8);
+  if(textW>room)textW=Math.Max(0,room);
+  statusDetail.SetBounds(tx,uy+Ui.Px(23),Math.Max(1,textW+Ui.Px(8)),Ui.Px(20));
+  int mx=statusDetail.Text.Length==0?tx:tx+textW+Ui.Px(3);
+  moreLink.SetBounds(mx,uy+Ui.Px(23),linkW,Ui.Px(20));
+  moreBox.SetBounds(X0,uy+Ui.Px(46),ValuesRight-X0,Math.Max(0,boxHeight-Ui.Px(8)));
+ }
+ // "Details" auf- bzw. zuklappen: höchstens sechs Zeilen (sonst Bildlauf im Feld); die Zeilen darunter,
+ // die Karte, alles darunter und das Fenster rücken um Feldhöhe + 8.
+ void SetDetailsOpen(bool on) {
+  int want=0;
+  if(on&&moreValue.Length>0) {
+   int width=Math.Max(Ui.Px(40),ValuesRight-X0-Ui.Px(16));
+   int line=TextRenderer.MeasureText("Ag",detailFont).Height;
+   int h=TextRenderer.MeasureText(moreValue,detailFont,new Size(width,0),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;
+   bool scroll=h>line*6;
+   h=Math.Min(h,line*6);
+   moreText.ScrollBars=scroll?ScrollBars.Vertical:ScrollBars.None;
+   want=h+Ui.Px(12)+Ui.Px(8);
+  } else on=false;
+  moreOpen=on;
+  moreText.Text=moreValue;
+  moreLink.Text=on?"Weniger":"Details";
+  moreBox.Visible=on;
+  int d=want-boxHeight;
+  boxHeight=want;
+  foreach(var c in belowDetails)c.Top+=d;
+  GrowCard(d);
+  LayoutStatus();
+ }
+ // Die feste Fenstergröße (MinimumSize = MaximumSize) vorher lösen und danach neu setzen.
+ void GrowCard(int d) {
+  if(d==0||updateCard==null)return;
+  bool locked=MinimumSize==MaximumSize&&MinimumSize!=Size.Empty;
+  MinimumSize=Size.Empty;MaximumSize=Size.Empty;
+  int bottom=updateCard.Bottom;
+  foreach(Control c in Controls)if(c!=updateCard&&c.Top>=bottom)c.Top+=d;
+  updateCard.Height+=d;
+  ClientSize=new Size(ClientSize.Width,ClientSize.Height+d);
+  if(locked){MinimumSize=Size;MaximumSize=Size;}
  }
  void ShowStatus(UpdateStatus st) {
   string glyph;Color color=Ui.Muted,textColor=Ui.TextColor;
   switch(st.State) {
-   case UpdateState.Current:glyph="\uE930";color=Ui.SuccessColor;break;
-   case UpdateState.Available:glyph="\uE896";color=Ui.Accent;textColor=Ui.Accent;break;
-   case UpdateState.Error:glyph="\uE7BA";color=Ui.ErrorColor;break;
-   case UpdateState.Checking:glyph="\uE895";break;
-   default:glyph="\uE946";break;
+   case UpdateState.Current:glyph="";color=Ui.SuccessColor;break;
+   case UpdateState.Available:glyph="";color=Ui.Accent;textColor=Ui.Accent;break;
+   case UpdateState.Error:glyph="";color=Ui.ErrorColor;break;
+   case UpdateState.Checking:glyph="";textColor=Ui.Muted;break;
+   default:glyph="";break;
   }
   statusGlyph.Glyph=glyph;statusGlyph.GlyphColor=color;
   statusText.Text=st.Text;statusText.ForeColor=textColor;
+  updateTips.SetToolTip(statusText,st.Text);
   statusDetail.Text=st.Detail??"";
+  updateTips.SetToolTip(statusDetail,st.Detail??"");
+  moreValue=st.More??"";
+  moreLink.Visible=moreValue.Length>0;
   if(st.State==UpdateState.Available&&hooks.CanInstall!=null&&hooks.CanInstall()) {
-   mode=ButtonMode.Install;statusButton.Text="Aktualisieren";statusButton.Kind=ButtonKind.Primary;statusButton.Glyph="\uE896";
+   mode=ButtonMode.Install;statusButton.Text="Aktualisieren";statusButton.Kind=ButtonKind.Primary;statusButton.Glyph="";
   } else if(st.State==UpdateState.Available) {
-   mode=ButtonMode.Page;statusButton.Text="Release-Seite";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="\uE71B";
+   mode=ButtonMode.Page;statusButton.Text="Release-Seite";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="";
   } else {
-   mode=ButtonMode.Check;statusButton.Text="Jetzt prüfen";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="\uE72C";
+   mode=ButtonMode.Check;statusButton.Text="Jetzt prüfen";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="";
   }
   statusButton.Enabled=st.State!=UpdateState.Checking;
-  // Knopf auf Höhe der ersten Zeile, rechtsbündig; der Stand bekommt den Platz links davon.
-  statusButton.Location=new Point(updateCard.Width-Ui.Px(16)-statusButton.Width,statusText.Top+(statusText.Height-statusButton.Height)/2);
-  statusText.Width=Math.Max(Ui.Px(40),statusButton.Left-Ui.Px(8)-statusText.Left);
+  // Neuer Stand: Feld schließen (auch wenn er keinen Detailtext hat).
+  SetDetailsOpen(false);
  }
  async Task StatusButtonClick() {
   if(mode==ButtonMode.Install){Close();if(hooks.Install!=null)hooks.Install();return;}
   if(mode==ButtonMode.Page){if(hooks.OpenPage!=null)hooks.OpenPage();return;}
-  ShowStatus(new UpdateStatus{State=UpdateState.Checking,Text="Prüfe auf GitHub …",Detail=statusDetail.Text});
+  ShowStatus(new UpdateStatus{State=UpdateState.Checking,Text="Prüfe auf GitHub …",Detail=""});
   UpdateStatus result;
   try {result=await hooks.CheckNow();}
-  catch(Exception ex){result=new UpdateStatus{State=UpdateState.Error,Text="Prüfung nicht möglich",Detail=ex.Message};}
+  catch(Exception ex){result=UpdateStatus.FromError(ex);}
   if(!IsDisposed)ShowStatus(result);
  }
 }
@@ -145,6 +236,15 @@ public enum UpdateState {Unknown,Current,Available,Error,Checking}
 public class UpdateStatus {
  public UpdateState State;
  public string Text,Detail;
+ // Technischer Originaltext für "Details" (leer = kein "Details").
+ public string More="";
+ // Fehler der Prüfung als Stand: feste Kurzmeldung (Message) mit Originaltext in Data["Detail"];
+ // unbekannte Fehler nur mit "Details". "Nur Vorabversionen" ist kein Fehler.
+ public static UpdateStatus FromError(Exception ex) {
+  if(ex.Data.Contains("Prerelease"))return new UpdateStatus{State=UpdateState.Unknown,Text="Nur Vorabversionen",Detail="Noch keine fertige Version."};
+  if(ex.Data.Contains("Detail"))return new UpdateStatus{State=UpdateState.Error,Text="Prüfung nicht möglich",Detail=ex.Message,More=ex.Data["Detail"] as string??""};
+  return new UpdateStatus{State=UpdateState.Error,Text="Prüfung nicht möglich",Detail="",More=ex.Message};
+ }
 }
 // Verbindung des Info-Fensters zur Update-Prüfung im Hauptfenster (Globale Richtlinien, Abschnitt "Updates").
 public class UpdateHooks {
@@ -155,6 +255,9 @@ public class UpdateHooks {
  public Func<bool> CanInstall;
  public Action Install;
  public Action OpenPage;
+ // "Automatisch aktualisieren" (ohne diese Hooks fehlt die Zeile im Info-Fenster).
+ public Func<bool> AutoInstall;
+ public Action<bool> SetAutoInstall;
 }
 
 // Seite "Programm hinzufügen" (im Hauptfenster eingebettet, Überschrift kommt von dort):
@@ -162,7 +265,18 @@ public class UpdateHooks {
 public class AddProgramForm:FixedSizeForm {
  class WindowChoice {
   public string Title,Process,Exe,Description;
+  // Programm hat mehrere Fenster in der Liste (z.B. Steam: Hauptfenster und Freunde).
+  public bool Shared;
+  // Programm steht schon ohne Fenstertitel in der Liste: weitere Fenster nur mit Fenstertitel.
+  public bool Listed;
  }
+ // Alle gefundenen Fenster; die Liste zeigt die, die zur Suche passen.
+ List<WindowChoice> allChoices=new List<WindowChoice>();
+ readonly TextBox searchBox=new TextBox();
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd,int msg,IntPtr wParam,string lParam);
+ readonly List<Entry> existingEntries=new List<Entry>();
+ readonly CheckCell onlyThis=new CheckCell();
+ readonly Label onlyThisLabel=new Label();
  readonly ListBox windows=new ListBox();
  readonly TextBox nameBox=new TextBox();
  readonly ModernButton addButton;
@@ -173,6 +287,9 @@ public class AddProgramForm:FixedSizeForm {
   excluded=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
   usedIds=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
   foreach(var entry in existing) {
+   existingEntries.Add(entry);
+   // Programme mit Fenstertitel schließen nur dieses Fenster aus, nicht das ganze Programm.
+   if(!String.IsNullOrEmpty(entry.WindowTitle))continue;
    if(!String.IsNullOrEmpty(entry.ProcessName))excluded.Add(entry.ProcessName);
    if(!String.IsNullOrEmpty(entry.AltProcessName))excluded.Add(entry.AltProcessName);
    usedIds.Add(entry.Id);
@@ -184,6 +301,20 @@ public class AddProgramForm:FixedSizeForm {
   var intro=new Label{Text="Wähle ein geöffnetes Fenster. Gespeichert wird nur seine Position und Größe – das Programm wird dafür nicht beendet.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",Bounds=new Rectangle(pad,y,inner,Ui.Px(40))};
   Controls.Add(intro);
   y+=Ui.Px(46);
+  // Suche (ab 2.52): filtert nach Fenstertitel, Programm (.exe) und Beschreibung.
+  var searchCard=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(36)),Padding=new Padding(Ui.Px(10),Ui.Px(8),Ui.Px(10),0)};
+  searchBox.Dock=DockStyle.Fill;searchBox.BorderStyle=BorderStyle.None;searchBox.BackColor=Ui.Surface;searchBox.ForeColor=Ui.TextColor;searchBox.Font=Ui.UiFont;
+  searchBox.HandleCreated+=(s,e)=>SendMessage(searchBox.Handle,0x1501,new IntPtr(1),"Suchen – Fenstertitel oder Programm, z.B. Steam");
+  searchBox.TextChanged+=(s,e)=>ApplyFilter();
+  searchBox.KeyDown+=(s,e)=>{
+   // Pfeiltasten wählen in der Liste, Enter fügt hinzu.
+   if(e.KeyCode==Keys.Down&&windows.Items.Count>0){windows.SelectedIndex=Math.Min(windows.Items.Count-1,windows.SelectedIndex+1);e.Handled=true;}
+   else if(e.KeyCode==Keys.Up&&windows.Items.Count>0){windows.SelectedIndex=Math.Max(0,windows.SelectedIndex-1);e.Handled=true;}
+   else if(e.KeyCode==Keys.Enter&&addButton.Enabled){Accept();e.Handled=e.SuppressKeyPress=true;}
+  };
+  searchCard.Controls.Add(searchBox);
+  Controls.Add(searchCard);
+  y+=searchCard.Height+Ui.Px(10);
   var listCard=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(268)),Padding=new Padding(Ui.Px(4))};
   windows.Dock=DockStyle.Fill;windows.BorderStyle=BorderStyle.None;windows.IntegralHeight=false;
   windows.DrawMode=DrawMode.OwnerDrawFixed;windows.ItemHeight=Ui.Px(44);
@@ -192,7 +323,14 @@ public class AddProgramForm:FixedSizeForm {
   windows.HandleCreated+=(s,e)=>Native.DarkScroll(windows);
   windows.SelectedIndexChanged+=(s,e)=>{
    var choice=windows.SelectedItem as WindowChoice;
-   if(choice!=null)nameBox.Text=String.IsNullOrEmpty(choice.Description)?choice.Process:choice.Description;
+   if(choice!=null) {
+    // Mehrere Fenster eines Programms: Fenstertitel als Name vorschlagen und nur dieses Fenster aufnehmen.
+    nameBox.Text=choice.Shared||choice.Listed?choice.Title:String.IsNullOrEmpty(choice.Description)?choice.Process:choice.Description;
+    onlyThis.Checked=choice.Shared||choice.Listed;
+    // Steht das Programm schon ohne Fenstertitel in der Liste, geht nur "dieses Fenster".
+    onlyThis.Enabled=!choice.Listed;
+    onlyThisLabel.Text="Nur das Fenster „"+choice.Title+"“ (für Programme mit mehreren Fenstern, z.B. Steam und Freundesliste)";
+   }
    UpdateButtons();
   };
   windows.DoubleClick+=(s,e)=>{if(windows.SelectedItem!=null)Accept();};
@@ -207,7 +345,15 @@ public class AddProgramForm:FixedSizeForm {
   nameBox.TextChanged+=(s,e)=>UpdateButtons();
   nameCard.Controls.Add(nameBox);
   Controls.Add(nameCard);
-  y+=nameCard.Height+Ui.Px(20);
+  y+=nameCard.Height+Ui.Px(10);
+  // Fenstertitel (ab 2.52): Eintrag gilt nur für dieses Fenster des Programms.
+  onlyThis.BackColor=Ui.Bg;onlyThis.Bounds=new Rectangle(pad-Ui.Px(6),y,Ui.Px(30),Ui.Px(28));
+  onlyThisLabel.Font=Ui.SmallFont;onlyThisLabel.ForeColor=Ui.TextColor;onlyThisLabel.BackColor=Ui.Bg;onlyThisLabel.AutoEllipsis=true;onlyThisLabel.UseMnemonic=false;
+  onlyThisLabel.TextAlign=ContentAlignment.MiddleLeft;onlyThisLabel.Cursor=Cursors.Hand;
+  onlyThisLabel.Bounds=new Rectangle(onlyThis.Right+Ui.Px(4),y,inner-Ui.Px(28),Ui.Px(28));
+  onlyThisLabel.Click+=(s,e)=>{if(onlyThis.Enabled)onlyThis.Checked=!onlyThis.Checked;};
+  Controls.Add(onlyThis);Controls.Add(onlyThisLabel);
+  y+=Ui.Px(28)+Ui.Px(14);
   var refresh=new ModernButton("Aktualisieren",ButtonKind.Secondary,"");
   refresh.Location=new Point(pad,y);
   refresh.Click+=(s,e)=>LoadWindows();
@@ -225,12 +371,14 @@ public class AddProgramForm:FixedSizeForm {
   ClientSize=new Size(w,y);
   // Im Hauptfenster füllt die Seite den Inhaltsbereich: Liste wächst mit, Name und Knöpfe bleiben unten.
   // (Anker erst nach der endgültigen Startgröße setzen, sonst stimmen die Abstände nicht.)
-  intro.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;
+  intro.Anchor=searchCard.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;
   listCard.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;
-  nameLabel.Anchor=nameCard.Anchor=AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;
+  nameLabel.Anchor=nameCard.Anchor=onlyThisLabel.Anchor=AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;
+  onlyThis.Anchor=AnchorStyles.Bottom|AnchorStyles.Left;
   refresh.Anchor=AnchorStyles.Bottom|AnchorStyles.Left;
   addButton.Anchor=cancel.Anchor=AnchorStyles.Bottom|AnchorStyles.Right;
   LoadWindows();
+  ActiveControl=searchBox;
  }
  void UpdateButtons(){addButton.Enabled=windows.SelectedItem!=null&&nameBox.Text.Trim().Length>0;}
  void LoadWindows() {
@@ -242,39 +390,60 @@ public class AddProgramForm:FixedSizeForm {
    choices.Add(new WindowChoice{Title="Rechner",Process="CalculatorApp",Exe=@"C:\Program Files\WindowsApps\CalculatorApp.exe",Description="Rechner"});
    choices.Add(new WindowChoice{Title="Terminal",Process="WindowsTerminal",Exe=@"C:\Program Files\WindowsApps\WindowsTerminal.exe",Description="Terminal"});
    choices.Add(new WindowChoice{Title="Unbenannt – Editor",Process="Notepad",Exe=@"C:\Windows\System32\notepad.exe",Description="Editor"});
-   windows.BeginUpdate();windows.Items.Clear();
-   foreach(var c in choices)windows.Items.Add(c);
-   windows.EndUpdate();
+   allChoices=choices;
+   ApplyFilter();
    windows.SelectedIndex=choices.Count-1;
    UpdateButtons();
    return;
   }
+  // Alle sichtbaren Fenster mit Titel (nicht nur das Hauptfenster je Programm), damit z.B. bei Steam das
+  // Hauptfenster und die Freundesliste getrennt wählbar sind.
   int own=Process.GetCurrentProcess().Id;
-  foreach(var process in Process.GetProcesses()) using(process) {
-   try {
-    if(process.Id==own||process.MainWindowHandle==IntPtr.Zero)continue;
-    string title=process.MainWindowTitle;
-    if(String.IsNullOrEmpty(title)||excluded.Contains(process.ProcessName))continue;
-    var choice=new WindowChoice{Title=title,Process=process.ProcessName};
-    // Pfad und Beschreibung sind bei Programmen mit Administratorrechten ohne eigene Adminrechte nicht lesbar.
+  var infos=new Dictionary<int,WindowChoice>();
+  foreach(var window in VisibleAlignment.TitledWindows()) {
+   if(window.ProcessId==own)continue;
+   WindowChoice info;
+   if(!infos.TryGetValue(window.ProcessId,out info)) {
+    info=null;
     try {
-     choice.Exe=process.MainModule.FileName;
-     choice.Description=FileVersionInfo.GetVersionInfo(choice.Exe).FileDescription;
-     if(choice.Description!=null) {
-      choice.Description=choice.Description.Trim();
-      // Manche Programme (z.B. der Windows-11-Editor) tragen nur den Dateinamen ein: "Notepad.exe" -> "Notepad".
-      if(choice.Description.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))choice.Description=choice.Description.Substring(0,choice.Description.Length-4);
+     using(var process=Process.GetProcessById(window.ProcessId)) {
+      info=new WindowChoice{Process=process.ProcessName};
+      // Pfad und Beschreibung sind bei Programmen mit Administratorrechten ohne eigene Adminrechte nicht lesbar.
+      try {
+       info.Exe=process.MainModule.FileName;
+       info.Description=FileVersionInfo.GetVersionInfo(info.Exe).FileDescription;
+       if(info.Description!=null) {
+        info.Description=info.Description.Trim();
+        // Manche Programme (z.B. der Windows-11-Editor) tragen nur den Dateinamen ein: "Notepad.exe" -> "Notepad".
+        if(info.Description.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))info.Description=info.Description.Substring(0,info.Description.Length-4);
+       }
+      } catch {}
      }
     } catch {}
-    choices.Add(choice);
-   } catch {}
+    infos[window.ProcessId]=info;
+   }
+   if(info==null)continue;
+   string title=window.Title.Trim();
+   // Schon mit genau diesem Fenstertitel in der Liste.
+   if(existingEntries.Any(x=>!String.IsNullOrEmpty(x.WindowTitle)&&String.Equals(x.ProcessName,info.Process,StringComparison.OrdinalIgnoreCase)&&String.Equals(x.WindowTitle.Trim(),title,StringComparison.CurrentCultureIgnoreCase)))continue;
+   choices.Add(new WindowChoice{Title=title,Process=info.Process,Exe=info.Exe,Description=info.Description,Listed=excluded.Contains(info.Process)});
   }
+  foreach(var choice in choices)choice.Shared=choices.Count(x=>String.Equals(x.Process,choice.Process,StringComparison.OrdinalIgnoreCase))>1;
   choices.Sort((a,b)=>String.Compare(a.Title,b.Title,StringComparison.CurrentCultureIgnoreCase));
+  allChoices=choices;
+  ApplyFilter();
+ }
+ // Liste nach dem Suchtext filtern (alle Wörter müssen in Titel, Programm oder Beschreibung vorkommen).
+ void ApplyFilter() {
+  var previous=windows.SelectedItem as WindowChoice;
+  string[] words=searchBox.Text.Trim().Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
+  var shown=allChoices.Where(c=>words.All(word=>(c.Title+" "+c.Process+".exe "+(c.Description??"")).IndexOf(word,StringComparison.CurrentCultureIgnoreCase)>=0)).ToList();
   windows.BeginUpdate();
   windows.Items.Clear();
-  foreach(var c in choices)windows.Items.Add(c);
+  foreach(var c in shown)windows.Items.Add(c);
   windows.EndUpdate();
-  if(windows.Items.Count>0)windows.SelectedIndex=0;
+  if(previous!=null&&shown.Contains(previous))windows.SelectedItem=previous;
+  else if(windows.Items.Count>0)windows.SelectedIndex=0;
   else nameBox.Text="";
   UpdateButtons();
  }
@@ -296,18 +465,19 @@ public class AddProgramForm:FixedSizeForm {
   var flags=TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.EndEllipsis|TextFormatFlags.Left|TextFormatFlags.NoPadding;
   int x=r.X+Ui.Px(14),width=r.Width-Ui.Px(24);
   TextRenderer.DrawText(g,choice.Title,Ui.UiSemibold,new Rectangle(x,r.Y+Ui.Px(4),width,Ui.Px(20)),Ui.TextColor,flags);
-  string detail=choice.Process+".exe"+(String.IsNullOrEmpty(choice.Description)?"":" · "+choice.Description)+(choice.Exe==null?" · Pfad nicht lesbar (Administrator?)":"");
+  string detail=choice.Process+".exe"+(String.IsNullOrEmpty(choice.Description)?"":" · "+choice.Description)+(choice.Listed?" · schon in der Liste – nur mit Fenstertitel":choice.Shared?" · mehrere Fenster":"")+(choice.Exe==null?" · Pfad nicht lesbar (Administrator?)":"");
   TextRenderer.DrawText(g,detail,Ui.SmallFont,new Rectangle(x,r.Y+Ui.Px(22),width,Ui.Px(18)),Ui.Muted,flags);
  }
  void Accept() {
   var choice=windows.SelectedItem as WindowChoice;
   string name=nameBox.Text.Trim();
   if(choice==null||name.Length==0)return;
+  string windowTitle=onlyThis.Checked||choice.Listed?choice.Title:null;
   var id=new StringBuilder("eigen-");
-  foreach(char c in choice.Process.ToLowerInvariant())id.Append(Char.IsLetterOrDigit(c)?c:'-');
+  foreach(char c in (choice.Process+(windowTitle!=null?"-"+windowTitle:"")).ToLowerInvariant())id.Append(Char.IsLetterOrDigit(c)?c:'-');
   string baseId=id.ToString(),unique=baseId;
   for(int i=2;usedIds.Contains(unique);i++)unique=baseId+"-"+i;
-  Result=new Entry{Id=unique,Name=name,ProcessName=choice.Process,Exe=choice.Exe,WindowOnly=true,Custom=true,Keys=new[]{"Window"}};
+  Result=new Entry{Id=unique,Name=name,ProcessName=choice.Process,Exe=choice.Exe,WindowOnly=true,Keys=new[]{"Window"},WindowTitle=windowTitle};
   DialogResult=DialogResult.OK;
   Close();
  }
@@ -392,6 +562,7 @@ public class OneTimeAlignForm:FixedSizeForm {
   Controls.Add(recentCard);
   ClientSize=new Size(w,Ui.Px(560));
   Resize+=(s,e)=>Arrange();
+  HandleCreated+=(s,e)=>{Arrange();PerformLayout();};
   Arrange();
   timer.Tick+=(s,e)=>CheckForeground();
   FormClosed+=(s,e)=>{timer.Stop();timer.Dispose();};
@@ -413,7 +584,15 @@ public class OneTimeAlignForm:FixedSizeForm {
   windowDetail.Bounds=new Rectangle(Ui.Px(16),Ui.Px(33),textWidth,Ui.Px(20));
  }
  // Seite füllt den Inhaltsbereich: oben Auswahl und Richtungen, darunter zwei Listen nebeneinander.
+ // Selbst angeordnete Bildlauf-Seite (Globale Richtlinien): nicht anordnen, solange die Seite noch nicht im Fenster
+ // sitzt oder das Fenster minimiert ist – sonst bleibt ein zu großer Bildlaufbereich mit leerer Fläche.
+ bool ReadyToArrange() {
+  if(!IsHandleCreated||ClientSize.Width<Ui.Px(400))return false;
+  var top=TopLevelControl as Form;
+  return top==null||top.WindowState!=FormWindowState.Minimized;
+ }
  void Arrange() {
+  if(!ReadyToArrange())return;
   int pad=Ui.Px(24),inner=Math.Max(Ui.Px(500),ClientSize.Width-2*pad),y=Ui.Px(4);
   int h=TextRenderer.MeasureText(intro.Text,intro.Font,new Size(inner,0),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height+Ui.Px(4);
   intro.Bounds=new Rectangle(pad,y,inner,h);
@@ -510,15 +689,22 @@ public class OneTimeAlignForm:FixedSizeForm {
    items.Add(new WindowItem{Title="Rechner",Process="CalculatorApp.exe"});
    items.Add(new WindowItem{Title="Unbenannt – Editor",Process="Notepad.exe"});
   } else {
-   foreach(var process in Process.GetProcesses()) using(process) {
+   // Alle sichtbaren Fenster mit Titel (ab 2.52 auch weitere Fenster eines Programms, z.B. die Steam-Freundesliste).
+   var names=new Dictionary<int,string>();
+   foreach(var window in VisibleAlignment.TitledWindows()) {
     try {
-     if(process.Id==(int)ownProcess||process.MainWindowHandle==IntPtr.Zero)continue;
-     string title=process.MainWindowTitle;
-     if(String.IsNullOrEmpty(title)||!IsWindowVisible(process.MainWindowHandle))continue;
+     if(window.ProcessId==(int)ownProcess)continue;
      var cls=new StringBuilder(256);
-     GetClassName(process.MainWindowHandle,cls,cls.Capacity);
+     GetClassName(window.Handle,cls,cls.Capacity);
      if(IgnoredClasses.Contains(cls.ToString()))continue;
-     items.Add(new WindowItem{Handle=process.MainWindowHandle,Title=title,Process=process.ProcessName+".exe"});
+     string name;
+     if(!names.TryGetValue(window.ProcessId,out name)) {
+      try {using(var process=Process.GetProcessById(window.ProcessId))name=process.ProcessName+".exe";}
+      catch {name="";}
+      names[window.ProcessId]=name;
+     }
+     if(name.Length==0)continue;
+     items.Add(new WindowItem{Handle=window.Handle,Title=window.Title.Trim(),Process=name});
     } catch {}
    }
    items.Sort((a,b)=>String.Compare(a.Title,b.Title,StringComparison.CurrentCultureIgnoreCase));
@@ -648,7 +834,19 @@ public class AlignRulesForm:FixedSizeForm {
  // Hinweis auf gegenseitige Nachbarbezüge (steht in der Statuszeile, solange nichts anderes dort steht).
  string cycleNote="";
  int[] colW=new int[6],colLeft=new int[6];
- int colX,measureW;
+ int colX,measureW,tableWidth;
+ // Anzeigeplatz je Programm (Index in programs → Zeile) und Sortierung; die Sortierung gilt bis zum Programmende.
+ int[] slot;
+ static int sortMode;
+ readonly List<Panel> rowPanels=new List<Panel>();
+ readonly Label programHead;
+ void ApplySort() {
+  var order=Enumerable.Range(0,programs.Count).ToList();
+  if(sortMode==1)order=order.OrderBy(k=>programs[k].Name,StringComparer.CurrentCultureIgnoreCase).ToList();
+  else if(sortMode==2)order=order.OrderByDescending(k=>programs[k].Name,StringComparer.CurrentCultureIgnoreCase).ToList();
+  for(int i=0;i<order.Count;i++)slot[order[i]]=i;
+  programHead.Text="Programm"+(sortMode==1?"  ↑ A–Z":sortMode==2?"  ↓ Z–A":"");
+ }
  public AlignRulesForm(Icon icon,IEnumerable<Entry> list,Dictionary<string,HashSet<string>> current,Dictionary<string,Dictionary<string,int>> currentGaps,Dictionary<string,Dictionary<string,string>> currentRefs,int globalGap) {
   programs=new List<Entry>(list);
   Refs=new Dictionary<string,Dictionary<string,string>>(StringComparer.OrdinalIgnoreCase);
@@ -659,16 +857,22 @@ public class AlignRulesForm:FixedSizeForm {
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
   int w=Ui.Px(944),pad=Ui.Px(24),inner=w-2*pad;
-  head=Ui.Px(36);rowH=Ui.Px(64);
-  description=new Label{Text="Angehakte Kanten werden ausgerichtet, nicht angehakte bleiben, wie sie sind. Neben dem Haken steht der Abstand in px: leer = allgemeiner Abstand ("+globalGap+" px), sonst gilt die Zahl nur für dieses Programm. Darunter steht, wovon der Abstand gilt: vom Bildschirmrand oder von einem Nachbarprogramm (anklicken zum Ändern). „Messen“ übernimmt die aktuellen Abstände des offenen Fensters für die angehakten Kanten.\r\n„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite). Eigene Programme haben keine Vorgabe.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
+  // Ab 2.52 flacher (vorher 64): Zeile 28 hoch, Bezug ("am Rand") direkt darunter.
+  head=Ui.Px(32);rowH=Ui.Px(50);
+  description=new Label{Text="Angehakte Kanten werden ausgerichtet, nicht angehakte bleiben, wie sie sind. Neben dem Haken steht der Abstand in px: leer = allgemeiner Abstand ("+globalGap+" px), sonst gilt die Zahl nur für dieses Programm. Darunter steht, wovon der Abstand gilt: vom Bildschirmrand oder von einem Nachbarprogramm (anklicken zum Ändern). „Messen“ übernimmt die aktuellen Abstände des offenen Fensters für die angehakten Kanten.\r\n„Automatisch“ richtet alle angehakten Kanten zusammen aus (Oben + Unten = volle Höhe, Links + Rechts = volle Breite). Die Vorgabe steht in der Programmliste; selbst hinzugefügte Programme haben keine.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
   Controls.Add(description);
-  // Höchstens 8 Zeilen, auf kleinen Bildschirmen weniger (darüber wird in der Tabelle gescrollt).
+  // Höchstens 10 Zeilen, auf kleinen Bildschirmen weniger (darüber wird in der Tabelle gescrollt).
   int fitRows=(Screen.PrimaryScreen.WorkingArea.Height-Ui.Px(540))/rowH;
-  int visibleRows=Math.Max(3,Math.Min(programs.Count,Math.Min(8,fitRows)));
+  int visibleRows=Math.Max(3,Math.Min(programs.Count,Math.Min(10,fitRows)));
   card=new Card{Bounds=new Rectangle(pad,0,inner,head+visibleRows*rowH+Ui.Px(10)),Padding=new Padding(Ui.Px(1))};
   header=new Panel{Dock=DockStyle.Top,Height=head,BackColor=Ui.Surface};
-  var programHead=new Label{Text="Programm",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleLeft};
+  // Sortieren (ab 2.52): Klick auf "Programm" wechselt Name A–Z, Name Z–A und die Reihenfolge der Programmliste.
+  programHead=new Label{Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",TextAlign=ContentAlignment.MiddleLeft,Cursor=Cursors.Hand,UseMnemonic=false};
+  programHead.Click+=(s,e)=>{sortMode=(sortMode+1)%3;ApplySort();Arrange();};
+  tips.SetToolTip(programHead,"Klicken zum Sortieren: Name A–Z, Name Z–A, Reihenfolge der Programmliste");
   header.Controls.Add(programHead);
+  slot=new int[programs.Count];
+  ApplySort();
   placers.Add(()=>programHead.Bounds=new Rectangle(Ui.Px(16),0,colX-Ui.Px(16),head));
   for(int i=0;i<Titles.Length;i++) {
    int index=i;
@@ -680,10 +884,15 @@ public class AlignRulesForm:FixedSizeForm {
   rows.HandleCreated+=(s,e)=>Native.DarkScroll(rows);
   for(int r=0;r<programs.Count;r++) {
    var entry=programs[r];
-   int top=r*rowH;
-   int lineTop=top+Ui.Px(6),lineH=Ui.Px(32);
-   var name=new Label{Text=entry.Name+(entry.Custom?"  (Eigenes)":""),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft};
-   rows.Controls.Add(name);
+   // Jede Zeile in einem eigenen Feld, damit sie sich beim Sortieren als Ganzes verschieben lässt.
+   var rowPanel=new Panel{BackColor=Ui.Surface};
+   rows.Controls.Add(rowPanel);rowPanels.Add(rowPanel);
+   int rowIndex=r;
+   placers.Add(()=>{rowPanel.Bounds=new Rectangle(0,slot[rowIndex]*rowH,tableWidth,rowH);rowPanel.TabIndex=slot[rowIndex];});
+   int top=0;
+   int lineTop=top+Ui.Px(4),lineH=Ui.Px(28);
+   var name=new Label{Text=entry.Name,Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false,TextAlign=ContentAlignment.MiddleLeft};
+   rowPanel.Controls.Add(name);
    placers.Add(()=>name.Bounds=new Rectangle(Ui.Px(16),lineTop,colX-Ui.Px(20),lineH));
    var row=new CheckCell[Directions.Length];
    var fields=new TextBox[EdgeCount];
@@ -692,7 +901,7 @@ public class AlignRulesForm:FixedSizeForm {
    Dictionary<string,string> entryRefs;
    if(!currentRefs.TryGetValue(entry.Id,out entryRefs))entryRefs=new Dictionary<string,string>();
    HashSet<string> allowed;
-   if(!current.TryGetValue(entry.Id,out allowed))allowed=MainForm.DefaultEdgesFor(entry.Id);
+   if(!current.TryGetValue(entry.Id,out allowed))allowed=MainForm.DefaultEdgesFor(entry);
    Dictionary<string,int> gaps;
    if(!currentGaps.TryGetValue(entry.Id,out gaps))gaps=new Dictionary<string,int>();
    for(int i=0;i<Directions.Length;i++) {
@@ -700,12 +909,12 @@ public class AlignRulesForm:FixedSizeForm {
     int index=i;
     var cell=new CheckCell{Checked=allowed.Contains(Directions[i])};
     row[i]=cell;
-    rows.Controls.Add(cell);
+    rowPanel.Controls.Add(cell);
     placers.Add(()=>cell.Bounds=edge?new Rectangle(colLeft[index],lineTop,Ui.Px(36),lineH):new Rectangle(colLeft[index],lineTop,colW[index],lineH));
     if(!edge)continue;
     // Abstandsfeld erscheint nur bei angehakter Kante.
-    var field=new Card{Size=new Size(Ui.Px(58),Ui.Px(30)),Padding=new Padding(Ui.Px(6),Ui.Px(6),Ui.Px(6),0)};
-    placers.Add(()=>field.Location=new Point(colLeft[index]+Ui.Px(38),lineTop+(lineH-Ui.Px(30))/2));
+    var field=new Card{Size=new Size(Ui.Px(58),Ui.Px(26)),Padding=new Padding(Ui.Px(6),Ui.Px(4),Ui.Px(6),0)};
+    placers.Add(()=>field.Location=new Point(colLeft[index]+Ui.Px(38),lineTop+(lineH-Ui.Px(26))/2));
     var box=new TextBox{Dock=DockStyle.Fill,BorderStyle=BorderStyle.None,TextAlign=HorizontalAlignment.Center,MaxLength=4,Font=Ui.UiFont,BackColor=Ui.Surface,ForeColor=Ui.TextColor};
     if(gaps.ContainsKey(Directions[i]))box.Text=gaps[Directions[i]].ToString();
     string cue=globalGap.ToString();
@@ -716,20 +925,20 @@ public class AlignRulesForm:FixedSizeForm {
     string refId;
     if(entryRefs.TryGetValue(Directions[i],out refId)&&programs.Any(x=>String.Equals(x.Id,refId,StringComparison.OrdinalIgnoreCase)&&x.Id!=entry.Id))chosen[i]=refId;
     var refLabel=new Label{Font=Ui.SmallFont,ForeColor=Ui.Accent,BackColor=Ui.Surface,Tag="accent",AutoEllipsis=true,UseMnemonic=false,Cursor=Cursors.Hand,TextAlign=ContentAlignment.MiddleLeft};
-    placers.Add(()=>refLabel.Bounds=new Rectangle(colLeft[index]+Ui.Px(4),lineTop+lineH,colW[index]-Ui.Px(8),Ui.Px(20)));
+    placers.Add(()=>refLabel.Bounds=new Rectangle(colLeft[index]+Ui.Px(4),lineTop+lineH,colW[index]-Ui.Px(8),Ui.Px(17)));
     var owner=entry;
     refLabel.Click+=(s,e)=>ShowRefMenu(owner,index,(Label)s);
     field.Visible=refLabel.Visible=cell.Checked;
     cell.CheckedChanged+=(s,e)=>{field.Visible=cell.Checked;refLabel.Visible=cell.Checked;UpdateCycles();};
-    rows.Controls.Add(field);rows.Controls.Add(refLabel);
+    rowPanel.Controls.Add(field);rowPanel.Controls.Add(refLabel);
     fields[i]=box;labels[i]=refLabel;
    }
    var measure=new ModernButton("Messen",ButtonKind.Ghost,null);
-   measure.Height=Ui.Px(32);measure.Margin=new Padding(0);
+   measure.Height=Ui.Px(28);measure.Margin=new Padding(0);
    placers.Add(()=>measure.Location=new Point(colX+colW.Sum()+(measureW-measure.Width)/2,lineTop+(lineH-measure.Height)/2));
    var measured=entry;
    measure.Click+=(s,e)=>Measure(measured);
-   rows.Controls.Add(measure);
+   rowPanel.Controls.Add(measure);
    cells[entry.Id]=row;boxes[entry.Id]=fields;refs[entry.Id]=chosen;refLabels[entry.Id]=labels;
    for(int i=0;i<EdgeCount;i++)UpdateRefLabel(entry.Id,i);
   }
@@ -754,6 +963,7 @@ public class AlignRulesForm:FixedSizeForm {
   // Starthöhe: Beschreibung, Tabelle, Statuszeile und Knöpfe; im Hauptfenster füllt die Seite den Inhaltsbereich.
   ClientSize=new Size(w,Ui.Px(4)+DescriptionHeight(inner)+Ui.Px(14)+card.Height+Ui.Px(16)+Ui.Px(38)+Ui.Px(20));
   Resize+=(s,e)=>Arrange();
+  HandleCreated+=(s,e)=>{Arrange();PerformLayout();};
   Arrange();
   UpdateCycles();
   initialState=State();
@@ -830,7 +1040,15 @@ public class AlignRulesForm:FixedSizeForm {
  }
  // Breite und Höhe verteilen: Die Spalten wachsen mit (bis 1,5-fach), der Rest geht an die Programmspalte;
  // die Tabelle nimmt die Höhe zwischen Beschreibung und Knöpfen ein und scrollt bei Bedarf.
+ // Selbst angeordnete Bildlauf-Seite (Globale Richtlinien): nicht anordnen, solange die Seite noch nicht im Fenster
+ // sitzt oder das Fenster minimiert ist – sonst bleibt ein zu großer Bildlaufbereich mit leerer Fläche.
+ bool ReadyToArrange() {
+  if(!IsHandleCreated||ClientSize.Width<Ui.Px(400))return false;
+  var top=TopLevelControl as Form;
+  return top==null||top.WindowState!=FormWindowState.Minimized;
+ }
  void Arrange() {
+  if(!ReadyToArrange())return;
   int pad=Ui.Px(24),inner=Math.Max(Ui.Px(400),ClientSize.Width-2*pad);
   int y=Ui.Px(4);
   int descriptionHeight=DescriptionHeight(inner);
@@ -855,7 +1073,7 @@ public class AlignRulesForm:FixedSizeForm {
   for(int i=0;i<colW.Length;i++)colW[i]=(int)Math.Round((i<EdgeCount?124:70)*factor*Ui.S);
   measureW=(int)Math.Round(96*factor*Ui.S);
   // Platz für die senkrechte Bildlaufleiste der Tabelle freihalten.
-  int tableWidth=inner-Ui.Px(2)-SystemInformation.VerticalScrollBarWidth;
+  tableWidth=inner-Ui.Px(2)-SystemInformation.VerticalScrollBarWidth;
   colX=tableWidth-Ui.Px(12)-colW.Sum()-measureW;
   for(int i=0,x=colX;i<colW.Length;x+=colW[i],i++)colLeft[i]=x;
   // In einer gescrollten Tabelle gelten Positionen relativ zur Ansicht: erst nach oben, dann zurück.
@@ -919,7 +1137,7 @@ public class AlignRulesForm:FixedSizeForm {
  }
  void ResetToDefaults() {
   foreach(var entry in programs) {
-   var allowed=MainForm.DefaultEdgesFor(entry.Id);
+   var allowed=MainForm.DefaultEdgesFor(entry);
    var row=cells[entry.Id];
    for(int i=0;i<Directions.Length;i++)row[i].Checked=allowed.Contains(Directions[i]);
    foreach(var box in boxes[entry.Id])box.Text="";
@@ -1002,7 +1220,7 @@ public class CheckCell:Control {
   var g=e.Graphics;
   g.Clear(BackColor);
   g.SmoothingMode=SmoothingMode.AntiAlias;
-  int size=Ui.Px(20);
+  int size=Ui.Px(18);
   var box=new Rectangle((Width-size)/2,(Height-size)/2,size,size);
   ProgramList.DrawCheck(g,box,isChecked,Enabled);
   if(Focused&&ShowFocusCues)

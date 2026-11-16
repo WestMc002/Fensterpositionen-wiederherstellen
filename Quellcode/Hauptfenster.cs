@@ -37,8 +37,13 @@ public class MainForm:Form {
  // Update-Hinweis oben (nur sichtbar, wenn auf GitHub eine neuere Version liegt).
  readonly UpdateBar updateBar=new UpdateBar();
  ReleaseInfo available;
- // Fehler der letzten Prüfung (für das Info-Fenster), null = kein Fehler.
- string updateError;
+ // Ergebnis der letzten Prüfung, wenn es kein normaler Stand ist (Fehler oder "Nur Vorabversionen"), sonst null.
+ UpdateStatus updateError;
+ bool updateRunning,installing;
+ // Prüfung still ca. 15 s nach jedem Start (ohne 20-Stunden-Sperre); "Automatisch aktualisieren" versucht es
+ // alle 5 Minuten erneut, solange das Programm beschäftigt ist.
+ readonly System.Windows.Forms.Timer updateTimer=new System.Windows.Forms.Timer{Interval=15000};
+ readonly System.Windows.Forms.Timer autoUpdateRetry=new System.Windows.Forms.Timer{Interval=5*60*1000};
  // Gesetzt beim Neustart nach einem Update (--nach-update).
  public static bool AfterUpdate;
  ActivityBar activity=new ActivityBar();
@@ -46,8 +51,9 @@ public class MainForm:Form {
  Bitmap signature;
  Label selectionInfo=new Label();
  List<Entry> entries=new List<Entry>();
- // Alle fest eingebauten Programme in ihrer Reihenfolge (auch ausgeblendete und nicht installierte).
- readonly List<Entry> builtIns=new List<Entry>();
+ // Vollständige Programmliste aus Positionen.json ("_programme") in ihrer Reihenfolge (auch ausgeblendete
+ // und nicht installierte); entries enthält davon nur die angezeigten.
+ readonly List<Entry> allPrograms=new List<Entry>();
  Dictionary<string,object> profiles;
  bool busy;
  // Navigation links (Globale Richtlinien; Vorlage: Wake on LAN): angepinnt = immer offen und schiebt den Inhalt;
@@ -79,20 +85,17 @@ public class MainForm:Form {
   // Einstellungen aus dem alten Ordner (bis Version 2.12) einmalig übernehmen.
   string migrated=DemoMode?null:Store.MigrateOldFolder();
   // Screenshots: ohne gespeicherte Einstellungen (Vorgaben, Abstand 18, Navigation angepinnt).
-  Setup();profiles=DemoMode?new Dictionary<string,object>():Store.Load();
-  if(!DemoMode)activeArrangement=Store.ActiveName(Store.LoadRaw());
-  builtIns.AddRange(entries);
-  string skipped=null,hiddenNames=null;
+  // Ab 2.52 stehen alle Programme in Positionen.json; beim ersten Start wird die Liste aus Startwerte.json
+  // und den eigenen Programmen dort angelegt (vorher Sicherung der Datei).
+  string programsMigrated=null,programsError=null;
   if(!DemoMode) {
-   // Fest eingebaute Programme, die hier nicht installiert sind, erscheinen nicht; selbst ausgeblendete ebenso.
-   var hidden=Store.HiddenIds(profiles);
-   var missing=entries.Where(x=>!Installed(x)).ToList();
-   var off=entries.Where(x=>hidden.Contains(x.Id)&&Installed(x)).ToList();
-   if(missing.Count>0)skipped=String.Join(", ",missing.Select(x=>x.Name).ToArray());
-   if(off.Count>0)hiddenNames=String.Join(", ",off.Select(x=>x.Name).ToArray());
-   entries.RemoveAll(x=>missing.Contains(x)||off.Contains(x));
-   entries.AddRange(Store.CustomEntries(profiles));
+   try {programsMigrated=Store.MigratePrograms();}
+   catch(Exception ex) {programsError="Programmliste konnte nicht in Positionen.json übernommen werden – "+ex.Message;}
   }
+  profiles=DemoMode?new Dictionary<string,object>():Store.Load();
+  if(!DemoMode)activeArrangement=Store.ActiveName(Store.LoadRaw());
+  string skipped=null,hiddenNames=null;
+  LoadPrograms(out skipped,out hiddenNames);
   restore=new ModernButton("Wiederherstellen",ButtonKind.Primary,"\uE777");
   save=new ModernButton("Positionen speichern",ButtonKind.Secondary,"\uE74E");
   alignTop=new ModernButton("Oben",ButtonKind.Secondary,"\uE74A");
@@ -192,14 +195,14 @@ public class MainForm:Form {
   alignTips.SetToolTip(alignHCenter,"Ausgewählte Fenster waagerecht mittig setzen (gleicher Abstand links und rechts)");
   alignTips.SetToolTip(alignVCenter,"Ausgewählte Fenster senkrecht mittig setzen (gleicher Abstand oben und unten)");
   alignTips.SetToolTip(alignAuto,"Alle angehakten Kanten aus „Kanten je Programm“ auf einmal ausrichten\r\n(Oben + Unten = volle Höhe, Links + Rechts = volle Breite, ↔/↕ Mitte = mittig)");
-  alignTips.SetToolTip(arrangement,"Anordnung wählen, neu anlegen, umbenennen oder löschen.\r\nJede Anordnung hat eigene Positionen und Kanten; eigene Programme gelten für alle.");
+  alignTips.SetToolTip(arrangement,"Anordnung wählen, neu anlegen, umbenennen oder löschen.\r\nJede Anordnung hat eigene Positionen und Kanten; Programmliste und Gruppen gelten für alle.");
   alignTips.SetToolTip(gapBox,"Abstand der sichtbaren Fensterkante zum Rand in Bildschirmpixeln (Standard 18)");
 
   hint.Dock=DockStyle.Fill;hint.Margin=new Padding(0,0,0,Ui.Px(14));
   // Drei kurze Zeilen, je ein Thema, damit nichts mitten im Satz umbricht.
   hint.Text="„Positionen speichern“ merkt sich Lage, Größe und Bildschirm; „Wiederherstellen“ setzt sie zurück und richtet danach die Kanten aus „Kanten je Programm“ aus.\r\n"+
-   "Dafür werden die Programme beendet und neu gestartet – TeamSpeak 3, Easy2Sync und eigene Programme bleiben offen.\r\n"+
-   "Rechtsklick auf ein Programm: ausblenden bzw. entfernen.";
+   "Programme mit Einstellungsdatei oder Registry werden dafür beendet und neu gestartet; die übrigen bleiben offen.\r\n"+
+   "Ziehen verschiebt ein Programm (auch in eine Gruppe); Rechtsklick: Gruppe, sortieren, ausblenden oder entfernen.";
 
   var logCard=new Card{Dock=DockStyle.Fill,Margin=new Padding(0),Padding=new Padding(Ui.Px(16),Ui.Px(6),Ui.Px(8),Ui.Px(12))};
   var logTitle=new Label{Text="Protokoll",Dock=DockStyle.Top,Height=Ui.Px(36),Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,TextAlign=ContentAlignment.MiddleLeft};
@@ -208,7 +211,7 @@ public class MainForm:Form {
   log.HandleCreated+=(s,e)=>Native.DarkScroll(log);
   logCard.Controls.Add(log);logCard.Controls.Add(logTitle);log.BringToFront();
 
-  int programsHeight=ProgramsHeight(entries.Count);
+  int programsHeight=ProgramsHeight(ProgramList.CountLines(entries,CollapsedGroups()));
   // Kopf (18 + 76), Fußzeile (66) und die festen Zeilen der Startseite.
   int fixedHeight=Ui.Px(18)+Ui.Px(76)+Ui.Px(66)+Ui.Px(17)+Ui.Px(52)+Ui.Px(52)+Ui.Px(88);
   // Seitenrand 28 rechts und links, links gemessen ab dem Rand der Navigation (Globale Richtlinien).
@@ -223,7 +226,7 @@ public class MainForm:Form {
   layout.RowStyles.Add(new RowStyle(SizeType.Absolute,Ui.Px(88)));
   layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
   updateBar.Dock=DockStyle.Fill;updateBar.Margin=new Padding(0,0,0,Ui.Px(10));updateBar.Visible=false;
-  updateBar.Install.Click+=async(s,e)=>await InstallUpdate();
+  updateBar.Install.Click+=async(s,e)=>await InstallUpdate(false);
   updateBar.Page.Click+=(s,e)=>OpenReleasePage();
   updateBar.Later.Click+=(s,e)=>ShowUpdateBar(false);
   layout.Controls.Add(updateBar,0,0);layout.Controls.Add(activity,0,1);layout.Controls.Add(programsCard,0,2);
@@ -238,9 +241,13 @@ public class MainForm:Form {
   Controls.Add(nav); // nicht angedockt: liegt ausgeklappt über dem Inhalt
   nav.BringToFront();
 
+  foreach(string group in CollapsedGroups())list.Collapsed.Add(group);
   foreach(var e in entries) list.Add(new ProgramRow{Entry=e,Name=e.Name,Checked=false}); // Beim Start ist nichts angehakt.
+  SyncEntries();
   list.CheckedChanged+=(s,e)=>UpdateSelection();
   list.RowMenu+=ShowRowMenu;
+  list.RowsReordered+=(s,e)=>SaveOrder(list.Rows.Select(x=>x.Entry).ToList(),null);
+  list.GroupsChanged+=(s,e)=>{SaveCollapsed();UpdateProgramsHeight();};
   rowMenu.Opened+=(s,e)=>MenuStyle.RoundCorners(rowMenu);
   UpdateSelection();
 
@@ -273,6 +280,8 @@ public class MainForm:Form {
   Log(AppInfo.Product+" Version "+AppInfo.Version+" – Farbschema: "+(Ui.Dark?"dunkel":"hell")+", Akzentfarbe "+Ui.Hex(Ui.AccentBase));
   TraceLog.Cleanup(30);
   if(migrated!=null)Log(migrated);
+  if(programsMigrated!=null)Log(programsMigrated);
+  if(programsError!=null)Log(programsError);
   Log("Positionen: "+Store.Display(Store.Profiles)+(activeArrangement!=Store.StandardName?" – Anordnung „"+activeArrangement+"“":""));
   Log("Protokolldatei: "+Store.Display(TraceLog.Today));
   if(skipped!=null)Log("Nicht installiert (nicht angezeigt): "+skipped);
@@ -282,14 +291,16 @@ public class MainForm:Form {
    if(result!=null&&result.StartsWith("OK"))Log("Update auf Version "+result.Substring(2).Trim()+" installiert.");
    else if(result!=null)Log("Update fehlgeschlagen: "+result.Replace("FEHLER","").Trim()+" – die bisherige Version läuft weiter.");
   }
-  // Update-Prüfung still beim Start (höchstens einmal täglich, abschaltbar im Info-Fenster).
+  // Update-Prüfung still ca. 15 s nach jedem Start (Globale Richtlinien, Updates; abschaltbar im Info-Fenster).
+  // Beim Wiederherstellen per Verknüpfung nicht: Das Programm beendet sich dort nach wenigen Sekunden.
+  updateTimer.Tick+=async(s,e)=>{updateTimer.Stop();await CheckForUpdates(false,true);};
+  autoUpdateRetry.Tick+=(s,e)=>{autoUpdateRetry.Stop();TryAutoUpdate();};
+  FormClosed+=(s,e)=>{updateTimer.Stop();autoUpdateRetry.Stop();};
   if(AutoRestore) {
    // Per Verknüpfung: minimiert wiederherstellen; bei Erfolg beendet sich das Programm, sonst zeigt es das Protokoll.
    WindowState=FormWindowState.Minimized;
    Shown+=async(s,e)=>await RunAutoRestore();
-  } else Shown+=async(s,e)=>await CheckForUpdates(false);
-  int customCount=entries.Count(x=>x.Custom);
-  if(customCount>0)Log("Eigene Programme: "+customCount);
+  } else Shown+=(s,e)=>{if(!DemoMode)updateTimer.Start();};
  }
  protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.DarkTitle(Handle);}
  // Windows meldet einen Wechsel zwischen hellem und dunklem Modus mit WM_SETTINGCHANGE "ImmersiveColorSet".
@@ -464,13 +475,19 @@ public class MainForm:Form {
   var guideItem=MenuStyle.Item("Anleitung öffnen",'\uE8A5',(s,a)=>{try{Process.Start(guide);}catch(Exception ex){MessageBox.Show(this,ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);}});
   guideItem.Enabled=System.IO.File.Exists(guide);
   settingsMenu.Items.Add(guideItem);
-  var hidden=HiddenBuiltIns();
+  var hidden=HiddenPrograms();
   if(hidden.Count>0) {
    settingsMenu.Items.Add(new ToolStripSeparator());
    var showHidden=MenuStyle.Item("Ausgeblendete wieder anzeigen ("+hidden.Count+")",'\uE890',(s,a)=>ShowHiddenPrograms());
    showHidden.Enabled=!busy;
    settingsMenu.Items.Add(showHidden);
   }
+  settingsMenu.Items.Add(new ToolStripSeparator());
+  var export=MenuStyle.Item("Einstellungen exportieren …",'\uEDE1',(s,a)=>BeginInvoke((Action)ExportSettings));
+  var import=MenuStyle.Item("Einstellungen importieren …",'\uE8B5',(s,a)=>BeginInvoke((Action)ImportSettings));
+  export.Enabled=!DemoMode;import.Enabled=!busy&&!DemoMode;
+  settingsMenu.Items.Add(export);
+  settingsMenu.Items.Add(import);
   settingsMenu.Items.Add(new ToolStripSeparator());
   settingsMenu.Items.Add(MenuStyle.Item("Info über "+AppInfo.Product,'\uE946',(s,a)=>BeginInvoke((Action)ShowInfo)));
   settingsMenu.Items.Add(MenuStyle.BottomSpacer());
@@ -591,15 +608,24 @@ public class MainForm:Form {
   var hooks=new UpdateHooks{
    Status=()=>CurrentUpdateStatus(),
    Auto=()=>UpdateAuto(),
-   SetAuto=on=>SaveUpdateSettings(on,null),
-   CheckNow=()=>CheckForUpdates(true),
+   SetAuto=on=>SaveUpdateSettings(on,null,null),
+   CheckNow=()=>CheckForUpdates(true,false),
+   AutoInstall=()=>UpdateAutoInstall(),
+   SetAutoInstall=on=>{
+    SaveUpdateSettings(null,null,on);
+    // Schon eine neue Version bekannt: gleich versuchen (erst nach dem Schließen des Info-Fensters).
+    if(on&&available!=null)BeginInvoke((Action)TryAutoUpdate);
+   },
    CanInstall=()=>available!=null&&Updater.InstallBlocker()==null&&!String.IsNullOrEmpty(available.ZipUrl),
-   Install=()=>BeginInvoke((Action)(async()=>await InstallUpdate())),
+   Install=()=>BeginInvoke((Action)(async()=>await InstallUpdate(false))),
    OpenPage=()=>OpenReleasePage()
   };
   using(var about=new AboutForm(signature,Icon,OpenBackups,hooks)) about.ShowDialog(this);
+  // "Automatisch aktualisieren" gerade eingeschaltet und eine neue Version ist bekannt: jetzt versuchen.
+  if(available!=null&&UpdateAutoInstall())TryAutoUpdate();
  }
- // Update-Einstellungen in Positionen.json ("_update": auto = beim Start prüfen, last = letzte Prüfung).
+ // Update-Einstellungen in Positionen.json ("_update": auto = automatisch prüfen, autoinstall = automatisch
+ // aktualisieren (Standard aus), last = letzte Prüfung in UTC, ISO 8601).
  Dictionary<string,object> UpdateSettings() {
   var saved=profiles!=null&&profiles.ContainsKey("_update")?profiles["_update"] as Dictionary<string,object>:null;
   return saved??new Dictionary<string,object>();
@@ -608,13 +634,17 @@ public class MainForm:Form {
   var saved=UpdateSettings();
   try {return !saved.ContainsKey("auto")||Convert.ToBoolean(saved["auto"]);} catch {return true;}
  }
+ bool UpdateAutoInstall() {
+  var saved=UpdateSettings();
+  try {return saved.ContainsKey("autoinstall")&&Convert.ToBoolean(saved["autoinstall"]);} catch {return false;}
+ }
  DateTime UpdateLast() {
   var saved=UpdateSettings();
   DateTime last;
   if(saved.ContainsKey("last")&&DateTime.TryParse(Convert.ToString(saved["last"]),System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.RoundtripKind,out last))return last;
   return DateTime.MinValue;
  }
- void SaveUpdateSettings(bool? auto,DateTime? last) {
+ void SaveUpdateSettings(bool? auto,DateTime? last,bool? autoInstall) {
   if(DemoMode)return;
   try {
    var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
@@ -622,6 +652,7 @@ public class MainForm:Form {
    if(settings==null){settings=new Dictionary<string,object>();copy["_update"]=settings;}
    if(auto.HasValue)settings["auto"]=auto.Value;
    if(last.HasValue)settings["last"]=last.Value.ToString("o",System.Globalization.CultureInfo.InvariantCulture);
+   if(autoInstall.HasValue)settings["autoinstall"]=autoInstall.Value;
    Store.SaveProfiles(copy);
    profiles=copy;
   } catch(Exception ex) {Log("Update-Einstellung konnte nicht gespeichert werden: "+ex.Message);}
@@ -629,35 +660,59 @@ public class MainForm:Form {
  UpdateStatus CurrentUpdateStatus() {
   DateTime last=UpdateLast();
   string checkedText=last==DateTime.MinValue?"":"Zuletzt geprüft "+last.ToLocalTime().ToString("dd.MM.yyyy");
+  // Fehler (auch beim automatischen Installieren) vor "Version x verfügbar": Kurzmeldung mit "Details".
+  if(updateError!=null&&updateError.State==UpdateState.Error)return updateError;
   if(available!=null)return new UpdateStatus{State=UpdateState.Available,Text="Version "+available.Version+" verfügbar",Detail=checkedText};
-  if(updateError!=null)return new UpdateStatus{State=UpdateState.Error,Text="Prüfung nicht möglich",Detail=updateError};
+  if(updateError!=null)return updateError;
   if(last==DateTime.MinValue)return new UpdateStatus{State=UpdateState.Unknown,Text="Noch nicht geprüft",Detail=""};
   return new UpdateStatus{State=UpdateState.Current,Text="Aktuell",Detail=checkedText};
  }
- // Neueste Version auf GitHub abfragen. Beim Start (manual=false) höchstens alle 20 Stunden und still.
- // Das Ergebnis einer Prüfung von Hand zeigt nur das Info-Fenster; im Hauptfenster erscheint nur bei
- // einer neuen Version die Hinweisleiste. Fehler stehen in der Protokolldatei.
- async Task<UpdateStatus> CheckForUpdates(bool manual) {
-  if(DemoMode)return CurrentUpdateStatus();
-  if(!manual&&(!UpdateAuto()||(DateTime.UtcNow-UpdateLast().ToUniversalTime()).TotalHours<20))return CurrentUpdateStatus();
+ // Neueste Version auf GitHub abfragen. Automatisch (manual=false) still ca. 15 s nach jedem Start, ohne
+ // 20-Stunden-Sperre. Das Ergebnis einer Prüfung von Hand zeigt nur das Info-Fenster; im Hauptfenster erscheint
+ // nur bei einer neuen Version die Hinweisleiste. Fehler stehen im Info-Fenster und in der Protokolldatei.
+ async Task<UpdateStatus> CheckForUpdates(bool manual,bool atStart) {
+  if(DemoMode||updateRunning)return CurrentUpdateStatus();
+  if(!manual&&(!UpdateAuto()||(!atStart&&(DateTime.UtcNow-UpdateLast().ToUniversalTime()).TotalHours<20)))return CurrentUpdateStatus();
+  updateRunning=true;
   try {
    var release=await Task.Run(()=>Updater.GetLatest());
-   SaveUpdateSettings(null,DateTime.UtcNow);
+   SaveUpdateSettings(null,DateTime.UtcNow,null);
    updateError=null;
    if(Updater.IsNewer(release.Version)) {
     bool fresh=available==null||available.Version!=release.Version;
     available=release;
     if(fresh)Log("Neue Version "+release.Version+" auf GitHub verfügbar (installiert: "+AppInfo.Version+").");
     ShowUpdateBar(true);
+    // "Automatisch aktualisieren": ohne Rückfrage installieren, sobald nichts mehr läuft (nicht bei "Jetzt prüfen").
+    if(!manual&&UpdateAutoInstall())BeginInvoke((Action)TryAutoUpdate);
    } else {
     available=null;
     ShowUpdateBar(false);
    }
   } catch(Exception ex) {
-   updateError=ex.Message;
-   TraceLog.Write("Update-Prüfung nicht möglich: "+ex.Message);
-  }
+   var st=UpdateStatus.FromError(ex);
+   updateError=st;
+   // "Nur Vorabversionen" ist kein Fehler: gilt als geprüft.
+   if(st.State!=UpdateState.Error){available=null;SaveUpdateSettings(null,DateTime.UtcNow,null);}
+   else TraceLog.Write("Update-Prüfung nicht möglich: "+ex.Message+(st.More.Length>0?" – "+st.More.Replace("\r\n"," "):""));
+  } finally {updateRunning=false;}
   return CurrentUpdateStatus();
+ }
+ // Beschäftigt: ein Ablauf läuft, die offene Seite hat ungespeicherte Änderungen, ein Dialog ist offen oder
+ // es wird gerade per Verknüpfung wiederhergestellt. Dann nicht automatisch aktualisieren (Neustart würde stören).
+ bool BusyForUpdate() {
+  if(busy||AutoRestore)return true;
+  var page=view as AlignRulesForm;
+  if(page!=null&&!page.IsDisposed&&page.HasChanges)return true;
+  foreach(Form f in Application.OpenForms)if(f.Visible&&f.Modal)return true;
+  return false;
+ }
+ // "Automatisch aktualisieren": installieren, wenn nichts läuft – sonst alle 5 Minuten erneut versuchen.
+ void TryAutoUpdate() {
+  if(available==null||installing||DemoMode||!UpdateAutoInstall()||!UpdateAuto())return;
+  if(Updater.InstallBlocker()!=null||String.IsNullOrEmpty(available.ZipUrl))return;
+  if(BusyForUpdate()){autoUpdateRetry.Stop();autoUpdateRetry.Start();return;}
+  BeginInvoke((Action)(async()=>await InstallUpdate(true)));
  }
  void ShowUpdateBar(bool show) {
   show=show&&available!=null;
@@ -682,28 +737,34 @@ public class MainForm:Form {
   try {Process.Start(available!=null&&!String.IsNullOrEmpty(available.PageUrl)?available.PageUrl:Updater.ReleasesPage);}
   catch(Exception ex){MessageBox.Show(this,ex.Message);}
  }
- async Task InstallUpdate() {
-  if(busy||available==null)return;
+ // automatic = "Automatisch aktualisieren": ohne Rückfrage, Fehler ohne Meldung (Hinweisleiste bleibt,
+ // Kurzmeldung mit "Details" im Info-Fenster).
+ async Task InstallUpdate(bool automatic) {
+  if(busy||installing||available==null)return;
   string blocker=Updater.InstallBlocker();
   if(blocker!=null||String.IsNullOrEmpty(available.ZipUrl)) {
+   if(automatic)return;
    Log((blocker??"Im Release ist keine ZIP-Datei angehängt.")+" Release-Seite wird geöffnet.");
    OpenReleasePage();
    return;
   }
-  if(MessageBox.Show(this,AppInfo.Product+" wird beendet, auf Version "+available.Version+" aktualisiert und neu gestartet. Einstellungen bleiben erhalten.\r\n\r\nJetzt aktualisieren?",
+  if(!automatic&&MessageBox.Show(this,AppInfo.Product+" wird beendet, auf Version "+available.Version+" aktualisiert und neu gestartet. Einstellungen bleiben erhalten.\r\n\r\nJetzt aktualisieren?",
    "Update",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+  installing=true;
   SetBusy(true);
   foreach(var b in new[]{updateBar.Install,updateBar.Page,updateBar.Later})b.Enabled=false;
   string text=updateBar.Text;
   try {
    Log("Lade Version "+available.Version+" …");
    await Updater.Install(available,percent=>BeginInvoke((Action)(()=>updateBar.Text="Lade Version "+available.Version+" … "+percent+" %")));
-   Log("Update wird installiert – Fensterpositionen startet gleich neu.");
+   Log("Update wird "+(automatic?"automatisch ":"")+"installiert – Fensterpositionen startet gleich neu.");
    busy=false;
    Close();
   } catch(Exception ex) {
-   Log("Update fehlgeschlagen: "+ex.Message);
-   MessageBox.Show(this,ex.Message,"Update",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+   installing=false;
+   Log((automatic?"Automatisches Update":"Update")+" fehlgeschlagen: "+ex.Message);
+   if(automatic)updateError=UpdateStatus.FromError(ex);
+   else MessageBox.Show(this,ex.Message,"Update",MessageBoxButtons.OK,MessageBoxIcon.Warning);
    updateBar.Text=text;
    SetBusy(false);
    foreach(var b in new[]{updateBar.Page,updateBar.Later})b.Enabled=true;
@@ -775,13 +836,13 @@ public class MainForm:Form {
  }
  // Demo-Ablauf für die Screenshots: eigenes Programm hinzugefügt, danach "Unten ausrichten" für einige Programme.
  internal void DemoRun() {
-  var demo=new Entry{Id="eigen-notepad",Name="Editor",ProcessName="notepad",Exe=@"C:\Windows\System32\notepad.exe",WindowOnly=true,Custom=true,Keys=new[]{"Window"}};
+  var demo=new Entry{Id="eigen-notepad",Name="Editor",ProcessName="notepad",Exe=@"C:\Windows\System32\notepad.exe",WindowOnly=true,Keys=new[]{"Window"}};
   entries.Add(demo);
   list.Add(new ProgramRow{Entry=demo,Name=demo.Name,Checked=false});
   UpdateProgramsHeight();
   var states=new Dictionary<string,string>{
    {"taskmanager","Unten: 18 px"},{"dumeter","Ausrichten übersprungen"},
-   {"franz","Unten: 18 px"},{"easy2sync","Ausrichten übersprungen"}};
+   {"discord","Unten: 18 px"},{"gpuz","Unten: 18 px"}};
   foreach(var row in list.Rows) {
    string status;
    if(states.TryGetValue(row.Entry.Id,out status)){row.Checked=true;row.Status=status;}
@@ -790,9 +851,10 @@ public class MainForm:Form {
   UpdateSelection();
   Log("Programm hinzugefügt: Editor (notepad.exe)");
   Log("Editor: Position gespeichert");
-  Log("Unten ausrichten (18 px) für: Task-Manager, DU Meter, Franz, Easy2Sync");
+  Log("Unten ausrichten (18 px) für: Task-Manager, DU Meter, GPU-Z, Discord");
   Log("Task-Manager: Unten: 18 px");
-  Log("Franz: Unten: 18 px");
+  Log("GPU-Z: Unten: 18 px");
+  Log("Discord: Unten: 18 px");
   Log("Zum dauerhaften Übernehmen der ausgerichteten Fenster jetzt Positionen speichern.");
  }
  // Screenshots: Seiten "Kanten je Programm" und "Programm hinzufügen" im Hauptfenster.
@@ -814,24 +876,28 @@ public class MainForm:Form {
   activity.Active=on;
  }
  static string Quote(string s){return "\""+s+"\"";}
- void Setup() {
-  string home=Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-  string roam=Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-  string local=Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-  entries.Add(new Entry{Id="taskmanager",Name="Task-Manager",ProcessName="Taskmgr",Exe=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","Taskmgr.exe"),File=Path.Combine(local,"Microsoft","Windows","TaskManager","settings.json"),Keys=new[]{"FullPosition","SmallPosition","FullViewDefaultSize"}});
-  entries.Add(new Entry{Id="dumeter",Name="DU Meter",ProcessName="DUMeter",Exe=@"C:\Program Files (x86)\DU Meter\DUMeter.exe",Registry=true,RegistryPath=@"Software\Hagel\DU Meter\Window",Keys=new[]{"WindowPosition"}});
-  entries.Add(new Entry{Id="franz",Name="Franz",ProcessName="Franz",Exe=Path.Combine(local,"Programs","franz","Franz.exe"),File=Path.Combine(roam,"Franz","app-state.json"),Keys=new[]{"windowState"}});
-  // TeamSpeak 3 (ab 2.31): Fenster direkt messen und verschieben wie Easy2Sync; die settings.db bleibt unberührt.
-  entries.Add(new Entry{Id="ts3",Name="TeamSpeak 3",ProcessName="ts3client_win64",Exe=@"C:\Program Files (x86)\TeamSpeak 3\ts3client_win64.exe",WindowOnly=true,Keys=new[]{"Window"}});
-  entries.Add(new Entry{Id="ts6",Name="TeamSpeak 6",ProcessName="TeamSpeak",Exe=@"C:\Program Files\TeamSpeak 6\TeamSpeak.exe",File=Path.Combine(roam,"TeamSpeak","Default","placement.json"),Keys=new[]{"ts_main_window"}});
-  entries.Add(new Entry{Id="discord",Name="Discord",ProcessName="Discord",Exe=Path.Combine(local,"Discord","Update.exe"),Args="--processStart Discord.exe",File=Path.Combine(roam,"discord","settings.json"),Keys=new[]{"WINDOW_BOUNDS","IS_MAXIMIZED","IS_MINIMIZED"}});
-  string e2sDir=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),"Easy2Sync");
-  string e2sExe=Path.Combine(e2sDir,Environment.Is64BitOperatingSystem&&System.IO.File.Exists(Path.Combine(e2sDir,"Easy2Sync64Bit.exe"))?"Easy2Sync64Bit.exe":"Easy2Sync.exe");
-  entries.Add(new Entry{Id="easy2sync",Name="Easy2Sync",ProcessName=Path.GetFileNameWithoutExtension(e2sExe),AltProcessName=Path.GetFileNameWithoutExtension(e2sExe)=="Easy2Sync"?"Easy2Sync64Bit":"Easy2Sync",Exe=e2sExe,WindowOnly=true,Keys=new[]{"Window"}});
-  entries.Add(new Entry{Id="gpuz",Name="GPU-Z",ProcessName="GPU-Z",Exe=@"C:\Program Files (x86)\GPU-Z\GPU-Z.exe",Registry=true,RegistryPath=@"Software\techPowerUp\GPU-Z",Keys=new[]{"WindowPos","WindowSizeResizable"}});
+ // Programmliste aus Positionen.json; nicht installierte und selbst ausgeblendete Programme erscheinen nicht.
+ // Screenshots (Demo): Startliste ohne gespeicherte Einstellungen.
+ void LoadPrograms(out string skipped,out string hiddenNames) {
+  skipped=null;hiddenNames=null;
+  allPrograms.Clear();entries.Clear();
+  if(DemoMode)allPrograms.AddRange(Demo.Programs());
+  else if(profiles!=null&&profiles.ContainsKey(Store.ProgramsKey))allPrograms.AddRange(Store.Programs(profiles));
+  // Übernahme fehlgeschlagen: wenigstens die bisherigen eigenen Programme anzeigen.
+  else allPrograms.AddRange(Store.CustomEntries(profiles));
+  entries.AddRange(allPrograms);
+  if(DemoMode)return;
+  var hidden=Store.HiddenIds(profiles);
+  var missing=entries.Where(x=>!Installed(x)).ToList();
+  var off=entries.Where(x=>hidden.Contains(x.Id)&&Installed(x)).ToList();
+  if(missing.Count>0)skipped=String.Join(", ",missing.Select(x=>x.Name).ToArray());
+  if(off.Count>0)hiddenNames=String.Join(", ",off.Select(x=>x.Name).ToArray());
+  entries.RemoveAll(x=>missing.Contains(x)||off.Contains(x));
  }
- static void RestartDUMeterService() {
-  using(var service=new System.ServiceProcess.ServiceController("DUMeterSvc")) {
+ Entry ProgramById(string id){return allPrograms.FirstOrDefault(x=>String.Equals(x.Id,id,StringComparison.OrdinalIgnoreCase));}
+ // Dienst neu starten (RestartService in der Programmliste, z.B. DUMeterSvc bei DU Meter).
+ static void RestartService(string name) {
+  using(var service=new System.ServiceProcess.ServiceController(name)) {
    service.Refresh();
    if(service.Status==System.ServiceProcess.ServiceControllerStatus.StopPending)
     service.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Stopped,TimeSpan.FromSeconds(20));
@@ -873,22 +939,11 @@ public class MainForm:Form {
  // Kanten je Programm (Fenster "Kanten je Programm"): angehakte Kanten werden bei "Automatisch" zusammen
  // ausgerichtet; die Schaltflächen Oben/Unten/Links/Rechts richten nur Programme aus, bei denen die Kante angehakt ist.
  // Oben + Unten = volle Höhe, Links + Rechts = volle Breite, Mitte = waagerecht mittig.
- // Gespeichert in Positionen.json ("_edges"); ohne Einstellung gelten diese Vorgaben (Verhalten bis 2.23).
+ // Gespeichert in Positionen.json ("_edges"); ohne Einstellung gilt die Vorgabe aus der Programmliste ("DefaultEdges").
  internal static readonly string[] AllEdges={"top","bottom","left","right","hcenter","vcenter"};
- internal static readonly Dictionary<string,string[]> DefaultEdges=new Dictionary<string,string[]>{
-  {"taskmanager",new[]{"bottom","right"}},
-  {"dumeter",new[]{"top","right"}},
-  {"franz",new[]{"top","bottom","left"}},
-  {"ts3",new[]{"top"}},
-  {"ts6",new[]{"top","bottom"}},
-  {"discord",new[]{"bottom","left"}},
-  {"easy2sync",new[]{"hcenter"}},
-  {"gpuz",new[]{"bottom"}}
- };
- // Vorgabe für ein Programm: Tabelle oben; eigene Programme haben keine Vorgabe (frei wählbar).
- internal static HashSet<string> DefaultEdgesFor(string id) {
-  string[] edges;
-  return new HashSet<string>(DefaultEdges.TryGetValue(id,out edges)?edges:new string[0]);
+ // Vorgabe eines Programms: "DefaultEdges" in der Programmliste; ohne Angabe keine (frei wählbar).
+ internal static HashSet<string> DefaultEdgesFor(Entry e) {
+  return new HashSet<string>(e!=null&&e.DefaultEdges!=null?e.DefaultEdges:new string[0]);
  }
  HashSet<string> EdgesFor(string id) {
   var saved=profiles!=null&&profiles.ContainsKey("_edges")?profiles["_edges"] as Dictionary<string,object>:null;
@@ -898,7 +953,7 @@ public class MainForm:Form {
    if(items!=null&&!(saved[id] is string))foreach(object item in items)if(item!=null)set.Add(Convert.ToString(item));
    return set;
   }
-  return DefaultEdgesFor(id);
+  return DefaultEdgesFor(ProgramById(id));
  }
  // Eigene Abstände je Kante ("_edgegaps"): fehlt ein Wert, gilt der allgemeine Abstand.
  internal const int MaxEdgeGap=5000;
@@ -1062,8 +1117,8 @@ public class MainForm:Form {
      string withGaps=Resolve(entry.Id,WithGaps(entry.Id,edges),notes);
      string status=await Task.Run(()=>VisibleAlignment.AlignEntry(entry,gap,withGaps));
      if(notes.Count>0)status+="; "+String.Join("; ",notes.ToArray());
-     if(entry.Id=="easy2sync") {
-      // Bei Easy2Sync weitere offene Fenster (z.B. Synchronisation) waagerecht mittig über dem Hauptfenster setzen;
+     if(entry.CenterOthers) {
+      // Z.B. bei Easy2Sync weitere offene Fenster (z.B. Synchronisation) waagerecht mittig über dem Hauptfenster setzen;
       // ihre Größe und senkrechte Lage bleiben.
       var extra=await Task.Run(()=>VisibleAlignment.CenterOthersOnMain(entry));
       foreach(string line in extra)Log(entry.Name+" – "+line);
@@ -1071,9 +1126,9 @@ public class MainForm:Form {
      }
      // Ab 2.33 wird keine eigene Regel mehr gespeichert: Wiederherstellen und die Nachkorrektur beim Start
      // verwenden immer die Tabelle "Kanten je Programm".
-     if(entry.Id=="dumeter") {
-      Log("DU Meter ist ausgerichtet. Dienst DUMeterSvc wird neu gestartet …");
-      try {await Task.Run(()=>RestartDUMeterService());status+="; Dienst neu gestartet";}
+     if(entry.RestartService!=null) {
+      Log(entry.Name+" ist ausgerichtet. Dienst "+entry.RestartService+" wird neu gestartet …");
+      try {await Task.Run(()=>RestartService(entry.RestartService));status+="; Dienst neu gestartet";}
       catch(Exception serviceError){throw new Exception("Fenster ausgerichtet; Dienst-Neustart fehlgeschlagen: "+serviceError.Message);}
      }
      item.Status=status;
@@ -1087,11 +1142,11 @@ public class MainForm:Form {
  // (Kopf und Fußzeile liegen außerhalb, über die volle Fensterbreite).
  const int UpdateRow=0,ProgramsRow=2;
  // Höhe des Programmbereichs: bis zu 12 Zeilen sichtbar, darüber wird die Liste gescrollt.
- int ProgramsHeight(int count){return list.RowHeight*Math.Max(1,Math.Min(count,12))+Ui.Px(44)+Ui.Px(16)+Ui.Px(14)+2;}
+ int ProgramsHeight(int count){return list.RowHeight*Math.Max(1,Math.Min(count,16))+Ui.Px(44)+Ui.Px(16)+Ui.Px(14)+2;}
  // Nach Hinzufügen/Entfernen: Programmbereich anpassen, das Fenster wächst bzw. schrumpft mit (begrenzt auf den Bildschirm).
  void UpdateProgramsHeight() {
   if(layout==null)return;
-  int target=ProgramsHeight(list.Rows.Count);
+  int target=ProgramsHeight(list.LineCount);
   int delta=target-(int)layout.RowStyles[ProgramsRow].Height;
   if(delta==0)return;
   layout.RowStyles[ProgramsRow].Height=target;
@@ -1105,7 +1160,7 @@ public class MainForm:Form {
  }
  void AddProgram() {
   if(busy)return;
-  var page=new AddProgramForm(Icon,entries);
+  var page=new AddProgramForm(Icon,allPrograms);
   // Unterseite von "Programme": "Hinzufügen" übernimmt, "Abbrechen" bzw. ein Wechsel über die Navigation verwirft.
   ShowView(navPrograms,page,result=>{if(result==DialogResult.OK&&page.Result!=null)AddEntry(page.Result);},"Programm hinzufügen");
  }
@@ -1118,23 +1173,25 @@ public class MainForm:Form {
    copy[entry.Id]=new Dictionary<string,object>{{"Window",VisibleAlignment.CaptureWindow(entry)}};
    status="Position gespeichert";
   } catch(Exception ex) {note=ex.Message;}
-  var updated=new List<Entry>(entries);updated.Add(entry);
-  Store.SetCustomEntries(copy,updated);
+  var updated=new List<Entry>(allPrograms);updated.Add(entry);
+  Store.SetPrograms(copy,updated);
   try {Store.SaveProfiles(copy);}
   catch(Exception ex) {Log(entry.Name+": konnte nicht gespeichert werden – "+ex.Message);return;}
   profiles=copy;
-  entries.Add(entry);
-  list.Add(new ProgramRow{Entry=entry,Name=entry.Name,Checked=false});
+  allPrograms.Add(entry);
+  var added=new ProgramRow{Entry=entry,Name=entry.Name,Checked=false};
+  list.Add(added);
+  SyncEntries();
   UpdateProgramsHeight();
   UpdateSelection();
-  list.Rows[list.Rows.Count-1].Status=status;
-  Log("Programm hinzugefügt: "+entry.Name+" ("+entry.ProcessName+".exe"+(String.IsNullOrEmpty(entry.Exe)?", Programmpfad unbekannt – wird nicht automatisch gestartet":"")+")");
+  added.Status=status;
+  Log("Programm hinzugefügt: "+entry.Name+" ("+entry.ProcessName+".exe"+(entry.WindowTitle!=null?", Fenster „"+entry.WindowTitle+"“":"")+(String.IsNullOrEmpty(entry.Exe)?", Programmpfad unbekannt – wird nicht automatisch gestartet":"")+")");
   if(note!=null)Log(entry.Name+": "+note+" Danach \"Positionen speichern\" verwenden.");
   else Log(entry.Name+": "+status);
  }
- // Programm gilt als installiert, wenn die Programmdatei existiert oder es gerade läuft.
+ // Programm gilt als installiert, wenn die Programmdatei existiert oder es gerade läuft (ohne Programmpfad immer).
  static bool Installed(Entry e) {
-  if(e.Custom)return true;
+  if(String.IsNullOrEmpty(e.Exe))return true;
   try {
    if(!String.IsNullOrEmpty(e.Exe)&&System.IO.File.Exists(e.Exe))return true;
    foreach(string name in new[]{e.ProcessName,e.AltProcessName}) {
@@ -1148,31 +1205,162 @@ public class MainForm:Form {
   return false;
  }
  // Selbst ausgeblendete, installierte Programme (für "wieder anzeigen").
- List<Entry> HiddenBuiltIns() {
+ List<Entry> HiddenPrograms() {
   var hidden=Store.HiddenIds(profiles);
-  return builtIns.Where(x=>hidden.Contains(x.Id)&&!entries.Contains(x)&&Installed(x)).ToList();
+  return allPrograms.Where(x=>hidden.Contains(x.Id)&&!entries.Contains(x)&&Installed(x)).ToList();
  }
  void ShowRowMenu(object sender,RowMenuEventArgs e) {
   if(busy)return;
   var row=e.Row;
-  var hidden=HiddenBuiltIns();
+  var hidden=HiddenPrograms();
+  var groups=list.Groups();
   // Menü bei jedem Öffnen neu aufbauen, damit Farben und Symbol zum aktuellen Hell-/Dunkelmodus passen.
   MenuStyle.Prepare(rowMenu);
   rowMenu.Items.Add(MenuStyle.TopSpacer());
   if(row!=null&&row.Entry!=null) {
-   if(row.Entry.Custom)rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ entfernen",'\uE74D',(s,a)=>RemoveProgram(row)));
-   else rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ ausblenden",'\uED1A',(s,a)=>HideProgram(row)));
+   rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ umbenennen …",'\uE8AC',(s,a)=>BeginInvoke((Action)(()=>RenameProgram(row)))));
+   rowMenu.Items.Add(MenuStyle.Item("Gruppe …",'\uE8FD',(s,a)=>BeginInvoke((Action)(()=>ShowGroupChoice(row,e.Location)))));
+   rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ ausblenden",'\uED1A',(s,a)=>HideProgram(row)));
+   rowMenu.Items.Add(MenuStyle.Item("„"+row.Name+"“ entfernen …",'\uE74D',(s,a)=>RemoveProgram(row)));
+  }
+  if(e.Group!=null) {
+   string group=e.Group;
+   rowMenu.Items.Add(MenuStyle.Item("Gruppe „"+group+"“ umbenennen …",'\uE8AC',(s,a)=>BeginInvoke((Action)(()=>RenameGroup(group)))));
+   rowMenu.Items.Add(MenuStyle.Item("Gruppe „"+group+"“ auflösen",'\uE711',(s,a)=>DissolveGroup(group)));
+  }
+  if(groups.Count>1) {
+   rowMenu.Items.Add(new ToolStripSeparator());
+   rowMenu.Items.Add(MenuStyle.Item("Alle Gruppen einklappen",'\uE70E',(s,a)=>SetAllCollapsed(true)));
+   rowMenu.Items.Add(MenuStyle.Item("Alle Gruppen ausklappen",'\uE70D',(s,a)=>SetAllCollapsed(false)));
   }
   if(hidden.Count>0) {
-   if(row!=null&&row.Entry!=null)rowMenu.Items.Add(new ToolStripSeparator());
+   rowMenu.Items.Add(new ToolStripSeparator());
    rowMenu.Items.Add(MenuStyle.Item("Ausgeblendete wieder anzeigen ("+hidden.Count+")",'\uE890',(s,a)=>ShowHiddenPrograms()));
   }
   if(rowMenu.Items.Count>1)rowMenu.Items.Add(new ToolStripSeparator());
+  // Sortieren: nur innerhalb der Gruppe der Zeile bzw. innerhalb jeder Gruppe; die Reihenfolge der Gruppen bleibt.
+  string block=e.Group??(row!=null&&row.Entry!=null?row.Entry.Group??"":null);
+  if(block!=null&&list.Rows.Count(x=>String.Equals(x.Entry.Group??"",block,StringComparison.CurrentCultureIgnoreCase))>1)
+   rowMenu.Items.Add(MenuStyle.Item(block.Length==0?"Programme ohne Gruppe nach Name sortieren":"Gruppe „"+block+"“ nach Name sortieren",'\uE8CB',(s,a)=>SortByName(block)));
+  if(list.Rows.Count>1)rowMenu.Items.Add(MenuStyle.Item(groups.Count>0?"Alle Gruppen einzeln nach Name sortieren":"Nach Name sortieren",'\uE8CB',(s,a)=>SortByName(null)));
   rowMenu.Items.Add(MenuStyle.Item("Kanten je Programm …",'\uE9A6',(s,a)=>EditEdges()));
   rowMenu.Items.Add(MenuStyle.BottomSpacer());
   MenuStyle.ShowOnScreen(rowMenu,list,e.Location,ToolStripDropDownDirection.BelowRight);
  }
- // Fest eingebautes Programm ausblenden; gespeicherte Werte bleiben erhalten.
+ // ---------------------------------------------------------------- Gruppen (ab 2.52)
+ // Gruppe je Programm in der Programmliste ("Group"), eingeklappte Gruppen unter "_gruppenzu" (für alle Anordnungen).
+ readonly ContextMenuStrip groupMenu=new ContextMenuStrip();
+ List<string> CollapsedGroups() {
+  var result=new List<string>();
+  var items=profiles!=null&&profiles.ContainsKey(Store.CollapsedKey)?profiles[Store.CollapsedKey] as System.Collections.IEnumerable:null;
+  if(items!=null&&!(items is string))foreach(object item in items)if(item!=null)result.Add(Convert.ToString(item));
+  return result;
+ }
+ void SaveCollapsed() {
+  if(DemoMode)return;
+  var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+  var names=list.Collapsed.Where(x=>allPrograms.Any(p=>String.Equals(p.Group,x,StringComparison.CurrentCultureIgnoreCase))).OrderBy(x=>x).ToList<object>();
+  if(names.Count==0)copy.Remove(Store.CollapsedKey);else copy[Store.CollapsedKey]=names;
+  try {Store.SaveProfiles(copy);profiles=copy;}
+  catch(Exception ex) {Log("Gruppen konnten nicht gespeichert werden – "+ex.Message);}
+ }
+ // entries in Anzeigereihenfolge der Liste halten (Gruppen ordnen die Zeilen um).
+ void SyncEntries(){entries.Clear();entries.AddRange(list.Rows.Select(x=>x.Entry));}
+ // Gruppen der Programme geändert (Entry.Group schon gesetzt): Liste neu ordnen und speichern.
+ void SaveGroups(string message) {
+  list.Rebuild();
+  UpdateProgramsHeight();
+  UpdateSelection();
+  SaveOrder(list.Rows.Select(x=>x.Entry).ToList(),message);
+  SaveCollapsed();
+ }
+ // Anzeigename ändern (ab 2.52), z.B. "Epic Games Launcher" → "Epic". Id, Prozess und gespeicherte Werte bleiben.
+ void RenameProgram(ProgramRow row) {
+  if(busy)return;
+  var entry=row.Entry;
+  string old=entry.Name;
+  string name=InputDialog.Ask(this,"Programm umbenennen","Nur der Name in der Liste ändert sich; Positionen, Kanten und Gruppe bleiben.",old,"Umbenennen",text=>{
+   if(text.Length==0)return "Bitte einen Namen eingeben.";
+   if(text.Length>60)return "Höchstens 60 Zeichen.";
+   if(allPrograms.Any(x=>x!=entry&&String.Equals(x.Name,text,StringComparison.CurrentCultureIgnoreCase)))return "Diesen Namen hat schon ein anderes Programm.";
+   return null;
+  });
+  if(name==null)return;
+  name=name.Trim();
+  if(name==old)return;
+  entry.Name=name;row.Name=name;
+  list.Invalidate();
+  SaveOrder(list.Rows.Select(x=>x.Entry).ToList(),"„"+old+"“ heißt jetzt „"+name+"“.");
+ }
+ void ShowGroupChoice(ProgramRow row,Point location) {
+  if(busy)return;
+  string current=row.Entry.Group??"";
+  MenuStyle.Prepare(groupMenu);
+  groupMenu.Items.Add(MenuStyle.TopSpacer());
+  groupMenu.Items.Add(MenuStyle.Choice("Ohne Gruppe",current.Length==0,(s,a)=>SetGroup(row,null)));
+  foreach(string group in list.Groups()) {
+   string name=group;
+   groupMenu.Items.Add(MenuStyle.Choice(name,String.Equals(current,name,StringComparison.CurrentCultureIgnoreCase),(s,a)=>SetGroup(row,name)));
+  }
+  groupMenu.Items.Add(new ToolStripSeparator());
+  groupMenu.Items.Add(MenuStyle.Choice("Neue Gruppe …",false,(s,a)=>BeginInvoke((Action)(()=>NewGroup(row)))));
+  groupMenu.Items.Add(MenuStyle.BottomSpacer());
+  groupMenu.Opened-=GroupMenuOpened;groupMenu.Opened+=GroupMenuOpened;
+  MenuStyle.ShowOnScreen(groupMenu,list,location,ToolStripDropDownDirection.BelowRight);
+ }
+ void GroupMenuOpened(object sender,EventArgs e){MenuStyle.RoundCorners(groupMenu);}
+ void SetGroup(ProgramRow row,string group) {
+  if(busy)return;
+  string old=row.Entry.Group??"";
+  if(String.Equals(old,group??"",StringComparison.CurrentCultureIgnoreCase))return;
+  // Unter vorhandener Schreibweise einsortieren.
+  if(group!=null)group=list.Groups().FirstOrDefault(x=>String.Equals(x,group,StringComparison.CurrentCultureIgnoreCase))??group;
+  row.Entry.Group=group;
+  // Neue Mitglieder ans Ende ihrer Gruppe.
+  list.Rows.Remove(row);list.Rows.Add(row);
+  if(group!=null)list.Collapsed.Remove(group);
+  SaveGroups(row.Name+(group==null?": ohne Gruppe.":" → Gruppe „"+group+"“."));
+ }
+ Func<string,string> GroupNameCheck(string old) {
+  return name=>{
+   if(name.Length==0)return "Bitte einen Namen eingeben.";
+   if(name.Length>40)return "Höchstens 40 Zeichen.";
+   if(old==null||!String.Equals(old,name,StringComparison.CurrentCultureIgnoreCase))
+    if(allPrograms.Any(x=>String.Equals(x.Group,name,StringComparison.CurrentCultureIgnoreCase)))return "Diese Gruppe gibt es schon.";
+   return null;
+  };
+ }
+ void NewGroup(ProgramRow row) {
+  if(busy)return;
+  string name=InputDialog.Ask(this,"Neue Gruppe","„"+row.Name+"“ kommt in die neue Gruppe. Weitere Programme per Rechtsklick › „Gruppe …“ oder durch Ziehen hinzufügen.","","Anlegen",GroupNameCheck(null));
+  if(name==null)return;
+  SetGroup(row,name.Trim());
+ }
+ void RenameGroup(string old) {
+  if(busy)return;
+  string name=InputDialog.Ask(this,"Gruppe umbenennen",null,old,"Umbenennen",GroupNameCheck(old));
+  if(name==null)return;
+  name=name.Trim();
+  if(name==old)return;
+  foreach(var e in allPrograms)if(String.Equals(e.Group,old,StringComparison.CurrentCultureIgnoreCase))e.Group=name;
+  if(list.Collapsed.Remove(old))list.Collapsed.Add(name);
+  SaveGroups("Gruppe „"+old+"“ heißt jetzt „"+name+"“.");
+ }
+ void DissolveGroup(string group) {
+  if(busy)return;
+  foreach(var e in allPrograms)if(String.Equals(e.Group,group,StringComparison.CurrentCultureIgnoreCase))e.Group=null;
+  list.Collapsed.Remove(group);
+  SaveGroups("Gruppe „"+group+"“ aufgelöst; ihre Programme stehen jetzt ohne Gruppe.");
+ }
+ void SetAllCollapsed(bool collapsed) {
+  if(busy)return;
+  list.Collapsed.Clear();
+  if(collapsed)foreach(string group in list.Groups())list.Collapsed.Add(group);
+  list.Rebuild();
+  SaveCollapsed();
+  UpdateProgramsHeight();
+ }
+ // Programm ausblenden; es bleibt in der Programmliste, gespeicherte Werte bleiben erhalten.
  void HideProgram(ProgramRow row) {
   if(busy)return;
   var entry=row.Entry;
@@ -1190,7 +1378,7 @@ public class MainForm:Form {
  }
  void ShowHiddenPrograms() {
   if(busy)return;
-  var back=HiddenBuiltIns();
+  var back=HiddenPrograms();
   if(back.Count==0)return;
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   var ids=Store.HiddenIds(copy);
@@ -1200,19 +1388,92 @@ public class MainForm:Form {
   catch(Exception ex) {Log("Ausgeblendete Programme konnten nicht angezeigt werden – "+ex.Message);return;}
   profiles=copy;
   foreach(var e in back) {
-   // An der ursprünglichen Stelle einfügen (Reihenfolge der fest eingebauten Programme, eigene danach).
-   int pos=entries.Count(x=>!x.Custom&&builtIns.IndexOf(x)<builtIns.IndexOf(e));
+   // An der ursprünglichen Stelle einfügen (Reihenfolge der Programmliste).
+   int pos=entries.Count(x=>allPrograms.IndexOf(x)<allPrograms.IndexOf(e));
    entries.Insert(pos,e);
    list.Insert(pos,new ProgramRow{Entry=e,Name=e.Name,Checked=false});
   }
+  SyncEntries();
   UpdateProgramsHeight();
   UpdateSelection();
   Log("Wieder angezeigt: "+String.Join(", ",back.Select(x=>x.Name).ToArray()));
  }
+ // Reihenfolge (ab 2.52): Ziehen in der Liste, Strg+Pfeil oder "Nach Name sortieren"; gespeichert als
+ // Reihenfolge von "_programme". Ausgeblendete und nicht installierte Programme behalten ihre Plätze,
+ // die angezeigten werden in der neuen Reihenfolge auf ihre bisherigen Plätze verteilt.
+ void SaveOrder(List<Entry> shown,string message) {
+  var slots=new Queue<Entry>(shown);
+  var updated=allPrograms.Select(x=>entries.Contains(x)&&slots.Count>0?slots.Dequeue():x).ToList();
+  if(!DemoMode) {
+   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+   Store.SetPrograms(copy,updated);
+   try {Store.SaveProfiles(copy);}
+   catch(Exception ex) {Log("Reihenfolge konnte nicht gespeichert werden – "+ex.Message);return;}
+   profiles=copy;
+  }
+  allPrograms.Clear();allPrograms.AddRange(updated);
+  entries.Clear();entries.AddRange(shown);
+  if(message!=null)Log(message);
+ }
+ // group: nur diese Gruppe ("" = Programme ohne Gruppe) bzw. null = jede Gruppe für sich. Die Reihenfolge der
+ // Gruppen bleibt, nur die Programme innerhalb werden nach Name geordnet.
+ void SortByName(string group) {
+  if(busy)return;
+  Func<Entry,string> blockOf=x=>x.Group??"";
+  var blocks=entries.Select(blockOf).Distinct(StringComparer.CurrentCultureIgnoreCase).ToList();
+  var sorted=new List<Entry>();
+  foreach(string block in blocks) {
+   var members=entries.Where(x=>String.Equals(blockOf(x),block,StringComparison.CurrentCultureIgnoreCase)).ToList();
+   if(group==null||String.Equals(group,block,StringComparison.CurrentCultureIgnoreCase))
+    members=members.OrderBy(x=>x.Name,StringComparer.CurrentCultureIgnoreCase).ToList();
+   sorted.AddRange(members);
+  }
+  if(sorted.SequenceEqual(entries))return;
+  // Zeilen samt Haken und Status mitnehmen.
+  var rows=list.Rows.OrderBy(x=>sorted.IndexOf(x.Entry)).ToList();
+  list.Rows.Clear();list.Rows.AddRange(rows);
+  list.Rebuild();
+  UpdateSelection();
+  SaveOrder(sorted,group==null?"Programme innerhalb jeder Gruppe nach Name sortiert.":group.Length==0?"Programme ohne Gruppe nach Name sortiert.":"Gruppe „"+group+"“ nach Name sortiert.");
+ }
+ // Einstellungen exportieren/importieren (ab 2.52): die ganze Positionen.json mit Programmliste, Positionen,
+ // Kanten und Anordnungen. Der Import ersetzt alles (vorher Sicherung) und startet das Programm neu.
+ void ExportSettings() {
+  using(var dialog=new SaveFileDialog{Title="Einstellungen exportieren",Filter="Einstellungen (*.json)|*.json",FileName="Fensterpositionen-Einstellungen.json",OverwritePrompt=true}) {
+   if(dialog.ShowDialog(this)!=DialogResult.OK)return;
+   try {
+    Store.ExportSettings(dialog.FileName);
+    Log("Einstellungen exportiert ("+allPrograms.Count+" Programme, Anordnungen und Positionen): "+Store.Display(dialog.FileName));
+   } catch(Exception ex) {MessageBox.Show(this,"Die Einstellungen konnten nicht exportiert werden.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+  }
+ }
+ void ImportSettings() {
+  if(busy)return;
+  Dictionary<string,object> data;
+  string file;
+  using(var dialog=new OpenFileDialog{Title="Einstellungen importieren",Filter="Einstellungen (*.json)|*.json"}) {
+   if(dialog.ShowDialog(this)!=DialogResult.OK)return;
+   file=dialog.FileName;
+   try {data=Store.ReadSettings(file);}
+   catch(Exception ex) {MessageBox.Show(this,"Die Datei kann nicht importiert werden.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
+  }
+  int count=data.ContainsKey(Store.ProgramsKey)?Store.ProgramsFrom(data,Store.ProgramsKey).Count:Store.CustomEntries(data).Count;
+  int arrangements=Store.Arrangements(data).Count+1;
+  if(MessageBox.Show(this,"Programmliste, gespeicherte Positionen, Kanten und Anordnungen werden durch die Datei ersetzt ("+count+" Programme, "+arrangements+" Anordnung"+(arrangements==1?"":"en")+"). Die bisherigen Einstellungen werden vorher im Ordner Sicherungen abgelegt. "+AppInfo.Product+" startet danach neu.\r\n\r\nEinstellungen importieren?","Einstellungen importieren",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+  if(!ConfirmLeaveView())return;
+  CloseView();
+  string backup;
+  try {backup=Store.ReplaceSettings(data);}
+  catch(Exception ex) {Log("Einstellungen konnten nicht importiert werden – "+ex.Message);MessageBox.Show(this,"Die Einstellungen konnten nicht importiert werden.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
+  Log("Einstellungen importiert aus "+Store.Display(file)+(backup!=null?" – Sicherung der bisherigen: "+Store.Display(backup):"")+". Programm wird neu gestartet …");
+  try {Process.Start(new ProcessStartInfo(Application.ExecutablePath){UseShellExecute=true,WorkingDirectory=AppDomain.CurrentDomain.BaseDirectory});}
+  catch(Exception ex) {MessageBox.Show(this,"Die Einstellungen sind importiert, aber "+AppInfo.Product+" konnte nicht neu gestartet werden. Bitte von Hand starten.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+  Close();
+ }
  void RemoveProgram(ProgramRow row) {
   if(busy)return;
   var entry=row.Entry;
-  if(MessageBox.Show(this,"Die gespeicherte Fensterposition wird ebenfalls gelöscht; das Programm selbst bleibt unverändert.\r\n\r\n„"+entry.Name+"“ aus der Liste entfernen?","Programm entfernen",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+  if(MessageBox.Show(this,"„"+entry.Name+"“ wird aus der Programmliste in Positionen.json gelöscht, ebenso die gespeicherte Position und die Kanten-Einstellungen dieser Anordnung. Das Programm selbst bleibt unverändert.\r\n\r\nNur vorübergehend aus der Liste nehmen: „Ausblenden“ verwenden.\r\n\r\n„"+entry.Name+"“ entfernen?","Programm entfernen",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
   copy.Remove(entry.Id);
   // Auch Ausrichtungsregel, Kanten und eigene Abstände des Programms entfernen.
@@ -1220,10 +1481,11 @@ public class MainForm:Form {
    var rules=copy.ContainsKey(key)?copy[key] as Dictionary<string,object>:null;
    if(rules!=null)rules.Remove(entry.Id);
   }
-  Store.SetCustomEntries(copy,entries.Where(x=>x!=entry));
+  Store.SetPrograms(copy,allPrograms.Where(x=>x!=entry));
   try {Store.SaveProfiles(copy);}
   catch(Exception ex) {Log(entry.Name+": konnte nicht entfernt werden – "+ex.Message);return;}
   profiles=copy;
+  allPrograms.Remove(entry);
   entries.Remove(entry);
   list.Remove(row);
   UpdateProgramsHeight();
@@ -1233,8 +1495,9 @@ public class MainForm:Form {
  // Protokoll im Fenster und zusätzlich als Tagesdatei in TraceLogs.
  void Log(string text){log.AppendText(DateTime.Now.ToString("HH:mm:ss")+"  "+text+Environment.NewLine);TraceLog.Write(text);}
  bool Stop(Entry e) {
-  if(e.Id=="taskmanager") {
-   using(var task=Process.Start(new ProcessStartInfo("schtasks.exe","/End /TN \"Task Manager starten\""){CreateNoWindow=true,UseShellExecute=false,WindowStyle=ProcessWindowStyle.Hidden})) { task.WaitForExit(3000); }
+  // Geplante Aufgabe, die das Programm wieder startet, vorher beenden (EndTask, z.B. beim Task-Manager).
+  if(e.EndTask!=null) {
+   using(var task=Process.Start(new ProcessStartInfo("schtasks.exe","/End /TN "+Quote(e.EndTask)){CreateNoWindow=true,UseShellExecute=false,WindowStyle=ProcessWindowStyle.Hidden})) { task.WaitForExit(3000); }
   }
   bool running=false;
   var initial=Process.GetProcessesByName(e.ProcessName);
@@ -1280,12 +1543,12 @@ public class MainForm:Form {
  void Start(Entry e,bool afterRestore=false) {
   try {StartWithAlignment(e,afterRestore);}
   finally {
-   if(afterRestore && e.Id=="dumeter") {
+   if(afterRestore && e.RestartService!=null) {
     try {
-     RestartDUMeterService();
-     BeginInvoke((Action)(()=>Log("DU Meter: DUMeterSvc nach Wiederherstellen neu gestartet.")));
+     RestartService(e.RestartService);
+     BeginInvoke((Action)(()=>Log(e.Name+": "+e.RestartService+" nach Wiederherstellen neu gestartet.")));
     } catch(Exception ex) {
-     throw new Exception("DU-Meter-Wiederherstellung bearbeitet; Neustart von DUMeterSvc fehlgeschlagen: "+ex.Message,ex);
+     throw new Exception("Wiederherstellung bearbeitet; Neustart von "+e.RestartService+" fehlgeschlagen: "+ex.Message,ex);
     }
    }
   }
@@ -1313,7 +1576,7 @@ public class MainForm:Form {
      var notes=new List<string>();
      string result=VisibleAlignment.AlignEntry(e,gap,Resolve(e.Id,rule,notes));
      if(notes.Count>0)result+="; "+String.Join("; ",notes.ToArray());
-     if(e.Id=="dumeter" && !afterRestore)RestartDUMeterService();
+     if(e.RestartService!=null && !afterRestore)RestartService(e.RestartService);
      BeginInvoke((Action)(()=>Log(e.Name+": nach Start geprueft – "+result)));
      return;
     }
@@ -1363,8 +1626,8 @@ public class MainForm:Form {
          if(notes.Count>0)aligned+="; "+String.Join("; ",notes.ToArray());
          BeginInvoke((Action)(()=>Log(entry.Name+": ausgerichtet – "+aligned)));
         }
-        if(entry.Id=="easy2sync") {
-         // Weitere Easy2Sync-Fenster waagerecht mittig über dem Hauptfenster (Höhe und senkrechte Lage bleiben).
+        if(entry.CenterOthers) {
+         // Weitere Fenster des Programms (z.B. Easy2Sync) waagerecht mittig über dem Hauptfenster (Höhe und senkrechte Lage bleiben).
          var extra=VisibleAlignment.CenterOthersOnMain(entry);
          BeginInvoke((Action)(()=>{foreach(string line in extra)Log(entry.Name+" – "+line);}));
         }

@@ -56,10 +56,26 @@ static class Demo {
   }
  }
 
+ // Beispielprogramme (mit Gruppen) nur für die Screenshots (--screenshots); das Programm selbst enthält keine Programmliste,
+ // sie steht in Positionen.json bzw. Resources\Startwerte.json.
+ internal static List<Entry> Programs() {
+  var list=new List<Entry>();
+  string[][] items={
+   new[]{"taskmanager","Task-Manager","Taskmgr","bottom right","System"},
+   new[]{"dumeter","DU Meter","DUMeter","top right","System"},
+   new[]{"gpuz","GPU-Z","GPU-Z","bottom","System"},
+   new[]{"ts3","TeamSpeak 3","ts3client_win64","top","Kommunikation"},
+   new[]{"ts6","TeamSpeak 6","TeamSpeak","top bottom","Kommunikation"},
+   new[]{"discord","Discord","Discord","bottom left","Kommunikation"}};
+  foreach(var item in items)
+   list.Add(new Entry{Id=item[0],Name=item[1],ProcessName=item[2],WindowOnly=true,Keys=new[]{"Window"},DefaultEdges=item[3].Split(' '),Group=item[4].Length>0?item[4]:null});
+  return list;
+ }
  // Screenshots: keine Prüfung, das Info-Fenster zeigt "Aktuell – zuletzt geprüft <heute>".
  static UpdateHooks DemoUpdates() {
   var status=new UpdateStatus{State=UpdateState.Current,Text="Aktuell",Detail="Zuletzt geprüft "+DateTime.Now.ToString("dd.MM.yyyy")};
-  return new UpdateHooks{Status=()=>status,Auto=()=>true,SetAuto=on=>{},CheckNow=()=>Task.FromResult(status),CanInstall=()=>false,Install=()=>{},OpenPage=()=>{}};
+  return new UpdateHooks{Status=()=>status,Auto=()=>true,SetAuto=on=>{},CheckNow=()=>Task.FromResult(status),CanInstall=()=>false,Install=()=>{},OpenPage=()=>{},
+   AutoInstall=()=>false,SetAutoInstall=on=>{}};
  }
  static void Shot(Backdrop backdrop,Func<Form> create,Action<Form> prepare,string file) {
   using(var f=create()) {

@@ -282,23 +282,27 @@ public class ToggleSwitch:Control {
  protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(e.KeyCode==Keys.Space){Checked=!Checked;e.Handled=true;}}
  protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
  protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+ protected override void OnEnabledChanged(EventArgs e){base.OnEnabledChanged(e);Invalidate();}
  protected override void OnPaint(PaintEventArgs e) {
   var g=e.Graphics;
   Color parent=Ui.ParentFill(this);
   g.Clear(parent);
   g.SmoothingMode=SmoothingMode.AntiAlias;
+  // Gesperrt: blasser (z.B. "Automatisch aktualisieren", solange "Automatisch prüfen" aus ist).
+  Func<Color,Color> fade=c=>Enabled?c:Ui.Blend(c,parent,0.6f);
+  bool hot=hover&&Enabled;
   var r=new RectangleF(0.5f,0.5f,Width-1.5f,Height-1.5f);
   using(var path=Ui.Round(Rectangle.Round(r),(int)(r.Height/2))) {
    if(on) {
-    using(var brush=new SolidBrush(hover?Ui.PrimaryHover:Ui.Primary))g.FillPath(brush,path);
+    using(var brush=new SolidBrush(fade(hot?Ui.PrimaryHover:Ui.Primary)))g.FillPath(brush,path);
    } else {
-    using(var brush=new SolidBrush(hover?Ui.Blend(parent,Ui.Tint,0.06f):parent))g.FillPath(brush,path);
-    using(var pen=new Pen(Ui.Muted,Math.Max(1f,Ui.S)))g.DrawPath(pen,path);
+    using(var brush=new SolidBrush(hot?Ui.Blend(parent,Ui.Tint,0.06f):parent))g.FillPath(brush,path);
+    using(var pen=new Pen(fade(Ui.Muted),Math.Max(1f,Ui.S)))g.DrawPath(pen,path);
    }
   }
   float knob=on?Height*0.6f:Height*0.5f;
   float cx=on?Width-Height/2f:Height/2f,cy=Height/2f;
-  using(var brush=new SolidBrush(on?Ui.OnPrimary:Ui.Muted))g.FillEllipse(brush,cx-knob/2,cy-knob/2,knob,knob);
+  using(var brush=new SolidBrush(fade(on?Ui.OnPrimary:Ui.Muted)))g.FillEllipse(brush,cx-knob/2,cy-knob/2,knob,knob);
   if(Focused&&ShowFocusCues)using(var pen=new Pen(Ui.Blend(Ui.Accent,Ui.Tint,0.3f))){var f=Rectangle.Inflate(Rectangle.Round(r),-1,-1);using(var p2=Ui.Round(f,f.Height/2))g.DrawPath(pen,p2);}
  }
 }
@@ -415,7 +419,7 @@ public class InfoBar:Control {
   using(var pen=new Pen(Ui.Blend(Ui.Bg,Ui.Accent,0.28f))) {g.FillPath(brush,path);g.DrawPath(pen,path);}
   int x=Ui.Px(16);
   if(Ui.IconFont!=null) {
-   TextRenderer.DrawText(g,"",Ui.IconFont,new Rectangle(x,0,Ui.Px(20),Height),Ui.Accent,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.NoPadding);
+   TextRenderer.DrawText(g,"\uE946",Ui.IconFont,new Rectangle(x,0,Ui.Px(20),Height),Ui.Accent,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.NoPadding);
    x+=Ui.Px(34);
   }
   var flags=TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix|TextFormatFlags.Left;
@@ -483,60 +487,236 @@ public class ProgramRow {
 }
 public class RowMenuEventArgs:EventArgs {
  public ProgramRow Row;
+ // Rechtsklick auf eine Gruppenzeile: Name der Gruppe (Row ist dann null).
+ public string Group;
  public Point Location;
 }
+// Programmliste mit Gruppen (ab 2.52): Programme ohne Gruppe stehen oben, darunter je Gruppe eine Überschriftzeile
+// (Pfeil zum Ein-/Ausklappen, Kästchen für alle Programme der Gruppe, Name, Anzahl) und ihre Programme.
+// Rows enthält nur die Programme, immer in Anzeigereihenfolge; die Gruppe steht in Entry.Group.
 public class ProgramList:Panel {
  public readonly List<ProgramRow> Rows=new List<ProgramRow>();
  public event EventHandler CheckedChanged;
- // Rechtsklick auf eine Zeile (z.B. eigenes Programm entfernen).
+ // Rechtsklick auf eine Zeile (Programm oder Gruppe) bzw. auf die freie Fläche.
  public event EventHandler<RowMenuEventArgs> RowMenu;
+ // Reihenfolge oder Gruppe per Ziehen (Drag & Drop) oder Strg+Pfeil geändert; Rows ist bereits umsortiert.
+ public event EventHandler RowsReordered;
+ // Gruppe ein- oder ausgeklappt (Collapsed geändert).
+ public event EventHandler GroupsChanged;
+ public readonly HashSet<string> Collapsed=new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+ // Eine Zeile der Anzeige: Gruppe (Row==null) oder Programm.
+ class Line {public string Group;public ProgramRow Row;}
+ readonly List<Line> lines=new List<Line>();
  readonly ToolTip tip=new ModernToolTip();
  int hover=-1,focusIndex;
+ // Ziehen: Zeile (Index in lines), Startpunkt, Einfügestelle (0..lines.Count); suppressClick verhindert das Anhaken nach dem Loslassen.
+ int dragIndex=-1,dropIndex=-1;
+ Point dragStart;
+ bool dragging,suppressClick;
+ readonly System.Windows.Forms.Timer dragScroll=new System.Windows.Forms.Timer{Interval=40};
  public ProgramList() {
+  dragScroll.Tick+=(s,e)=>DragAutoScroll();
   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.Selectable,true);
   SetStyle(ControlStyles.StandardDoubleClick,false);
   BackColor=Ui.Surface;AutoScroll=true;TabStop=true;
  }
- public int RowHeight{get{return Ui.Px(42);}}
+ // Ab 2.52 flacher (vorher 42), damit mehr Programme ohne Bildlauf Platz haben.
+ public int RowHeight{get{return Ui.Px(32);}}
+ public int LineCount{get{return lines.Count;}}
+ static string GroupOf(ProgramRow row){return row.Entry!=null&&!String.IsNullOrEmpty(row.Entry.Group)?row.Entry.Group:"";}
+ // Gruppennamen in Anzeigereihenfolge (Reihenfolge des ersten Programms je Gruppe).
+ public List<string> Groups() {
+  var result=new List<string>();
+  foreach(var row in Rows){string g=GroupOf(row);if(g.Length>0&&!result.Contains(g,StringComparer.CurrentCultureIgnoreCase))result.Add(g);}
+  return result;
+ }
+ public List<ProgramRow> RowsOf(string group){return Rows.Where(x=>String.Equals(GroupOf(x),group,StringComparison.CurrentCultureIgnoreCase)).ToList();}
+ // Zeilenzahl für eine Programmliste (Höhe der Karte vor dem Füllen).
+ public static int CountLines(IEnumerable<Entry> entries,IEnumerable<string> collapsed) {
+  var closed=new HashSet<string>(collapsed,StringComparer.CurrentCultureIgnoreCase);
+  int count=0;
+  foreach(var group in entries.GroupBy(x=>x.Group??"",StringComparer.CurrentCultureIgnoreCase))
+   count+=group.Key.Length==0?group.Count():1+(closed.Contains(group.Key)?0:group.Count());
+  return count;
+ }
+ // Rows nach Gruppen ordnen (ohne Gruppe zuerst, dann Gruppen in Reihenfolge ihres ersten Programms; innerhalb
+ // unverändert) und die Anzeigezeilen neu aufbauen.
+ public void Rebuild() {
+  var order=Groups();
+  var sorted=Rows.Select((row,index)=>new{row,index}).OrderBy(x=>{string g=GroupOf(x.row);return g.Length==0?-1:order.FindIndex(y=>String.Equals(y,g,StringComparison.CurrentCultureIgnoreCase));}).ThenBy(x=>x.index).Select(x=>x.row).ToList();
+  Rows.Clear();Rows.AddRange(sorted);
+  lines.Clear();
+  foreach(var row in Rows)if(GroupOf(row).Length==0)lines.Add(new Line{Row=row});
+  foreach(string group in order) {
+   lines.Add(new Line{Group=group});
+   if(!Collapsed.Contains(group))foreach(var row in RowsOf(group))lines.Add(new Line{Row=row});
+  }
+  hover=-1;focusIndex=Math.Max(0,Math.Min(focusIndex,lines.Count-1));
+  AutoScrollMinSize=new Size(0,lines.Count*RowHeight);
+  Invalidate();
+ }
  public void Add(ProgramRow row) {
   row.Owner=this;Rows.Add(row);
-  AutoScrollMinSize=new Size(0,Rows.Count*RowHeight);
-  Invalidate();
+  Rebuild();
  }
  public void Insert(int index,ProgramRow row) {
   row.Owner=this;Rows.Insert(Math.Max(0,Math.Min(index,Rows.Count)),row);
-  AutoScrollMinSize=new Size(0,Rows.Count*RowHeight);
-  Invalidate();
+  Rebuild();
   if(CheckedChanged!=null)CheckedChanged(this,EventArgs.Empty);
  }
  public void Remove(ProgramRow row) {
   if(!Rows.Remove(row))return;
   row.Owner=null;
-  hover=-1;focusIndex=Math.Max(0,Math.Min(focusIndex,Rows.Count-1));
-  AutoScrollMinSize=new Size(0,Rows.Count*RowHeight);
-  Invalidate();
+  Rebuild();
   if(CheckedChanged!=null)CheckedChanged(this,EventArgs.Empty);
  }
+ public void SetCollapsed(string group,bool collapsed) {
+  if(collapsed?!Collapsed.Add(group):!Collapsed.Remove(group))return;
+  Rebuild();
+  if(GroupsChanged!=null)GroupsChanged(this,EventArgs.Empty);
+ }
+ // Alle Programme einer Gruppe an- bzw. abhaken (alle angehakt → alle ab, sonst alle an).
+ void ToggleGroup(string group) {
+  var members=RowsOf(group);
+  bool on=!members.All(x=>x.Checked);
+  foreach(var row in members)row.Checked=on;
+ }
  string TipText(int index) {
-  var row=Rows[index];
+  var line=lines[index];
+  if(line.Row==null)return "Gruppe „"+line.Group+"“\r\nKlick: ein-/ausklappen – Kästchen: alle an-/abhaken – Ziehen: Gruppe verschieben – Rechtsklick: umbenennen oder auflösen";
+  var row=line.Row;
   string text=row.Name+": "+row.Status;
-  if(row.Entry!=null)text+=row.Entry.Custom?"\r\nEigenes Programm – Rechtsklick zum Entfernen":"\r\nRechtsklick zum Ausblenden";
+  if(row.Entry!=null)text+="\r\nZiehen zum Verschieben (auch in eine Gruppe) – Rechtsklick für Gruppe, Sortieren, Ausblenden oder Entfernen";
   return text;
  }
  internal void RowChanged(bool checkedChanged) {
   Invalidate();
-  if(hover>=0&&hover<Rows.Count)tip.SetToolTip(this,TipText(hover));
+  if(hover>=0&&hover<lines.Count)tip.SetToolTip(this,TipText(hover));
   if(checkedChanged&&CheckedChanged!=null)CheckedChanged(this,EventArgs.Empty);
  }
  int IndexAt(Point p) {
   int y=p.Y-AutoScrollPosition.Y;
   if(y<0)return -1;
   int index=y/RowHeight;
-  return index<Rows.Count?index:-1;
+  return index<lines.Count?index:-1;
+ }
+ // Kästchen einer Gruppenzeile: bündig mit den Programmen ohne Gruppe; die Programme der Gruppe sind eingerückt.
+ Rectangle GroupBox(int index) {
+  int cb=Ui.Px(18),top=AutoScrollPosition.Y+index*RowHeight;
+  return new Rectangle(Ui.Px(16),top+(RowHeight-cb)/2,cb,cb);
  }
  protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.DarkScroll(this);}
+ // Einfügestelle für die Mausposition: zwischen zwei Zeilen, gemessen an der Zeilenmitte.
+ int DropAt(Point p) {
+  int y=p.Y-AutoScrollPosition.Y;
+  return Math.Max(0,Math.Min(lines.Count,(y+RowHeight/2)/RowHeight));
+ }
+ void DragAutoScroll() {
+  if(!dragging){dragScroll.Stop();return;}
+  Point p=PointToClient(Cursor.Position);
+  int step=0,edge=RowHeight/2;
+  if(p.Y<edge)step=-RowHeight/3;else if(p.Y>ClientSize.Height-edge)step=RowHeight/3;
+  if(step==0)return;
+  AutoScrollPosition=new Point(0,Math.Max(0,-AutoScrollPosition.Y+step));
+  dropIndex=DropAt(p);
+  Invalidate();
+ }
+ void EndDrag(bool apply) {
+  bool was=dragging;
+  int from=dragIndex,to=dropIndex;
+  dragging=false;dragIndex=-1;dropIndex=-1;dragScroll.Stop();Capture=false;
+  if(!was)return;
+  suppressClick=true;
+  Invalidate();
+  if(!apply||from<0||from>=lines.Count)return;
+  if(lines[from].Row==null)DropGroupAfter(lines[from].Group,GroupAbove(to,lines[from].Group));
+  else DropRow(lines[from].Row,to);
+ }
+ // ---- Gruppen verschieben (ab 2.52): Überschrift ziehen oder Strg+Pfeil auf der Überschrift.
+ // Gruppe ("" = ohne Gruppe) des Blocks, zu dem eine Zeile gehört.
+ string BlockOf(int line){return lines[line].Row==null?lines[line].Group:GroupOf(lines[line].Row);}
+ static bool Same(string a,string b){return String.Equals(a??"",b??"",StringComparison.CurrentCultureIgnoreCase);}
+ // Gruppe, hinter der eine gezogene Gruppe an der Einfügestelle landet ("" = als erste Gruppe).
+ string GroupAbove(int at,string dragged) {
+  for(int i=Math.Min(at,lines.Count)-1;i>=0;i--) {
+   string block=BlockOf(i);
+   if(!Same(block,dragged))return block;
+  }
+  return "";
+ }
+ // Einfügelinie beim Ziehen einer Gruppe: am Ende des Blocks der Gruppe darüber bzw. vor der ersten Gruppe.
+ int GroupDropLine(string above) {
+  if(above.Length==0){int first=lines.FindIndex(x=>x.Row==null);return first<0?lines.Count:first;}
+  int last=-1;
+  for(int i=0;i<lines.Count;i++)if(Same(BlockOf(i),above))last=i;
+  return last+1;
+ }
+ void DropGroupAfter(string group,string above) {
+  var moving=RowsOf(group);
+  if(moving.Count==0||Same(group,above))return;
+  var rest=Rows.Where(x=>!moving.Contains(x)).ToList();
+  int insert=above.Length==0?rest.Count(x=>GroupOf(x).Length==0):rest.FindLastIndex(x=>Same(GroupOf(x),above))+1;
+  rest.InsertRange(Math.Max(0,Math.Min(rest.Count,insert)),moving);
+  if(rest.SequenceEqual(Rows))return;
+  Rows.Clear();Rows.AddRange(rest);
+  Rebuild();
+  int line=lines.FindIndex(x=>x.Row==null&&Same(x.Group,group));
+  if(line>=0)focusIndex=line;
+  Invalidate();
+  if(RowsReordered!=null)RowsReordered(this,EventArgs.Empty);
+ }
+ void MoveGroup(string group,int direction) {
+  var groups=Groups();
+  int index=groups.FindIndex(x=>Same(x,group));
+  int target=index+direction;
+  if(index<0||target<0||target>=groups.Count)return;
+  DropGroupAfter(group,direction<0?(target>0?groups[target-1]:""):groups[target]);
+ }
+ // Programm an die Einfügestelle (Index in lines) setzen. Die Gruppe ergibt sich aus der Zeile darüber:
+ // Gruppenzeile oder Programm einer Gruppe = diese Gruppe; ganz oben bzw. unter einem Programm ohne Gruppe = ohne Gruppe.
+ void DropRow(ProgramRow row,int at) {
+  at=Math.Max(0,Math.Min(lines.Count,at));
+  string group="";
+  for(int i=at-1;i>=0;i--) {
+   if(lines[i].Row==row)continue;
+   group=lines[i].Row==null?lines[i].Group:GroupOf(lines[i].Row);
+   break;
+  }
+  // Unter einer eingeklappten Gruppe: ans Ende dieser Gruppe.
+  int rowsBefore=0;
+  for(int i=0;i<at;i++)if(lines[i].Row!=null&&lines[i].Row!=row)rowsBefore++;
+  if(at>0&&lines[at-1].Row==null&&Collapsed.Contains(lines[at-1].Group)) {
+   var members=RowsOf(group).Where(x=>x!=row).ToList();
+   rowsBefore=members.Count>0?Rows.Where(x=>x!=row).ToList().IndexOf(members[members.Count-1])+1:rowsBefore;
+  }
+  string oldGroup=GroupOf(row);
+  int oldIndex=Rows.IndexOf(row);
+  var rest=Rows.Where(x=>x!=row).ToList();
+  rowsBefore=Math.Max(0,Math.Min(rest.Count,rowsBefore));
+  if(String.Equals(oldGroup,group,StringComparison.CurrentCultureIgnoreCase)&&rowsBefore==oldIndex)return;
+  row.Entry.Group=group.Length==0?null:group;
+  rest.Insert(rowsBefore,row);
+  Rows.Clear();Rows.AddRange(rest);
+  Rebuild();
+  int line=lines.FindIndex(x=>x.Row==row);
+  if(line>=0)focusIndex=line;
+  Invalidate();
+  if(RowsReordered!=null)RowsReordered(this,EventArgs.Empty);
+ }
  protected override void OnMouseMove(MouseEventArgs e) {
   base.OnMouseMove(e);
+  if(dragIndex>=0&&e.Button==MouseButtons.Left&&Enabled) {
+   if(!dragging) {
+    Size min=SystemInformation.DragSize;
+    if(Math.Abs(e.X-dragStart.X)>min.Width||Math.Abs(e.Y-dragStart.Y)>min.Height){dragging=true;Capture=true;dragScroll.Start();tip.Hide(this);}
+   }
+   if(dragging) {
+    int drop=DropAt(e.Location);
+    if(drop!=dropIndex){dropIndex=drop;Invalidate();}
+    Cursor=Cursors.SizeNS;
+    return;
+   }
+  }
   int index=IndexAt(e.Location);
   if(index!=hover) {
    hover=index;Invalidate();
@@ -545,29 +725,59 @@ public class ProgramList:Panel {
   Cursor=index>=0?Cursors.Hand:Cursors.Default;
  }
  protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);hover=-1;Invalidate();}
- protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);Focus();}
+ protected override void OnMouseDown(MouseEventArgs e) {
+  base.OnMouseDown(e);Focus();
+  suppressClick=false;
+  if(e.Button==MouseButtons.Left&&Enabled&&Rows.Count>1) {
+   int index=IndexAt(e.Location);
+   // Programme und (bei mehreren Gruppen) Gruppenüberschriften lassen sich ziehen; nicht vom Kästchen aus.
+   bool header=index>=0&&lines[index].Row==null;
+   bool onBox=header&&Rectangle.Inflate(GroupBox(index),Ui.Px(6),Ui.Px(6)).Contains(e.Location);
+   dragIndex=index>=0&&(!header||(!onBox&&Groups().Count>1))?index:-1;
+   dragStart=e.Location;
+  }
+ }
+ protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(e.Button==MouseButtons.Left)EndDrag(true);else dragIndex=-1;}
+ protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);if(dragging&&!Capture)EndDrag(false);}
  protected override void OnMouseClick(MouseEventArgs e) {
   base.OnMouseClick(e);
+  if(suppressClick){suppressClick=false;return;}
   if(!Enabled)return;
   int index=IndexAt(e.Location);
   // Rechtsklick auf freie Fläche: Menü ohne Zeile (z.B. ausgeblendete Programme wieder anzeigen).
   if(index<0){if(e.Button==MouseButtons.Right&&RowMenu!=null)RowMenu(this,new RowMenuEventArgs{Row=null,Location=e.Location});return;}
   focusIndex=index;
-  if(e.Button==MouseButtons.Right){Invalidate();if(RowMenu!=null)RowMenu(this,new RowMenuEventArgs{Row=Rows[index],Location=e.Location});return;}
+  var line=lines[index];
+  if(e.Button==MouseButtons.Right){Invalidate();if(RowMenu!=null)RowMenu(this,new RowMenuEventArgs{Row=line.Row,Group=line.Row==null?line.Group:null,Location=e.Location});return;}
   if(e.Button!=MouseButtons.Left)return;
-  Rows[index].Checked=!Rows[index].Checked;
+  if(line.Row!=null){line.Row.Checked=!line.Row.Checked;return;}
+  // Gruppenzeile: Kästchen hakt alle an/ab, sonst ein-/ausklappen.
+  var box=Rectangle.Inflate(GroupBox(index),Ui.Px(6),Ui.Px(6));
+  if(box.Contains(e.Location))ToggleGroup(line.Group);
+  else SetCollapsed(line.Group,!Collapsed.Contains(line.Group));
  }
  protected override bool IsInputKey(Keys keyData) {
-  if(keyData==Keys.Up||keyData==Keys.Down||keyData==Keys.Space)return true;
+  if(keyData==Keys.Up||keyData==Keys.Down||keyData==Keys.Left||keyData==Keys.Right||keyData==Keys.Space||keyData==(Keys.Control|Keys.Up)||keyData==(Keys.Control|Keys.Down)||(keyData==Keys.Escape&&dragging))return true;
   return base.IsInputKey(keyData);
  }
  protected override void OnKeyDown(KeyEventArgs e) {
   base.OnKeyDown(e);
-  if(Rows.Count==0)return;
-  if(e.KeyCode==Keys.Up)focusIndex=Math.Max(0,focusIndex-1);
-  else if(e.KeyCode==Keys.Down)focusIndex=Math.Min(Rows.Count-1,focusIndex+1);
-  else if(e.KeyCode==Keys.Space)Rows[focusIndex].Checked=!Rows[focusIndex].Checked;
+  if(lines.Count==0)return;
+  if(e.KeyCode==Keys.Escape&&dragging){EndDrag(false);e.Handled=true;return;}
+  focusIndex=Math.Max(0,Math.Min(lines.Count-1,focusIndex));
+  var line=lines[focusIndex];
+  // Strg+Pfeil verschiebt das markierte Programm (wie Ziehen, auch über Gruppengrenzen).
+  if(e.Control&&(e.KeyCode==Keys.Up||e.KeyCode==Keys.Down)&&Enabled) {
+   if(line.Row!=null)DropRow(line.Row,e.KeyCode==Keys.Up?focusIndex-1:focusIndex+2);
+   else MoveGroup(line.Group,e.KeyCode==Keys.Up?-1:1);
+  }
+  else if(e.KeyCode==Keys.Up)focusIndex=Math.Max(0,focusIndex-1);
+  else if(e.KeyCode==Keys.Down)focusIndex=Math.Min(lines.Count-1,focusIndex+1);
+  else if(e.KeyCode==Keys.Left&&line.Row==null)SetCollapsed(line.Group,true);
+  else if(e.KeyCode==Keys.Right&&line.Row==null)SetCollapsed(line.Group,false);
+  else if(e.KeyCode==Keys.Space){if(line.Row!=null)line.Row.Checked=!line.Row.Checked;else ToggleGroup(line.Group);}
   else return;
+  focusIndex=Math.Max(0,Math.Min(lines.Count-1,focusIndex));
   int top=focusIndex*RowHeight,visible=-AutoScrollPosition.Y;
   if(top<visible)AutoScrollPosition=new Point(0,top);
   else if(top+RowHeight>visible+ClientSize.Height)AutoScrollPosition=new Point(0,top+RowHeight-ClientSize.Height);
@@ -585,11 +795,12 @@ public class ProgramList:Panel {
   g.SmoothingMode=SmoothingMode.AntiAlias;
   int offset=AutoScrollPosition.Y,h=RowHeight,w=ClientSize.Width;
   var flags=TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis;
-  for(int i=0;i<Rows.Count;i++) {
+  for(int i=0;i<lines.Count;i++) {
    var row=new Rectangle(0,offset+i*h,w,h);
    if(row.Bottom<0||row.Top>ClientSize.Height)continue;
-   var item=Rows[i];
-   if(i==hover&&Enabled) {
+   var line=lines[i];
+   bool draggedLine=dragging&&dragIndex>=0&&dragIndex<lines.Count&&(i==dragIndex||lines[dragIndex].Row==null&&line.Row!=null&&Same(GroupOf(line.Row),lines[dragIndex].Group));
+   if((i==hover&&Enabled&&!dragging)||draggedLine) {
     using(var path=Ui.Round(Rectangle.Inflate(row,-Ui.Px(2),-Ui.Px(2)),Ui.Px(4)))
     using(var brush=new SolidBrush(Ui.SurfaceHover)) g.FillPath(brush,path);
    }
@@ -597,44 +808,75 @@ public class ProgramList:Panel {
     using(var path=Ui.Round(Rectangle.Inflate(row,-Ui.Px(2),-Ui.Px(2)),Ui.Px(4)))
     using(var pen=new Pen(Ui.Blend(Ui.Accent,Ui.Surface,0.3f))) g.DrawPath(pen,path);
    }
-   if(i<Rows.Count-1)
+   // Trennlinie unter Programmen; über einer Gruppenzeile eine kräftigere Linie über die volle Breite.
+   if(i<lines.Count-1&&lines[i+1].Row!=null)
     using(var pen=new Pen(Ui.Blend(Ui.Border,Ui.Surface,0.35f))) g.DrawLine(pen,Ui.Px(14),row.Bottom-1,row.Right-Ui.Px(14),row.Bottom-1);
-   int cb=Ui.Px(20);
-   var box=new Rectangle(row.X+Ui.Px(16),row.Y+(h-cb)/2,cb,cb);
-   DrawCheck(g,box,item.Checked,Enabled);
-   var nameRect=new Rectangle(box.Right+Ui.Px(14),row.Y,Ui.Px(170),h);
-   TextRenderer.DrawText(g,item.Name,Ui.UiSemibold,nameRect,Enabled?Ui.TextColor:Ui.Muted,flags|TextFormatFlags.Left);
-   if(item.Entry!=null&&item.Entry.Custom) {
-    // Kleiner Hinweis unter dem Namen, dass es ein selbst hinzugefügtes Programm ist.
-    int nameWidth=TextRenderer.MeasureText(g,item.Name,Ui.UiSemibold,Size.Empty,TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding).Width;
-    if(nameWidth+Ui.Px(60)<nameRect.Width)
-     TextRenderer.DrawText(g,"Eigenes",Ui.SmallFont,new Rectangle(nameRect.X+nameWidth+Ui.Px(8),row.Y,nameRect.Width-nameWidth-Ui.Px(8),h),Ui.Muted,flags|TextFormatFlags.Left);
+   if(line.Row==null) {
+    if(i>0)using(var pen=new Pen(Ui.Border)) g.DrawLine(pen,Ui.Px(14),row.Top,row.Right-Ui.Px(14),row.Top);
+    var members=RowsOf(line.Group);
+    bool closed=Collapsed.Contains(line.Group);
+    if(Ui.IconFont!=null)
+     using(var chevron=new Font(Ui.IconFont.FontFamily,8f))
+      TextRenderer.DrawText(g,closed?"\uE76C":"\uE70D",chevron,new Rectangle(row.Right-Ui.Px(40),row.Y,Ui.Px(24),h),Enabled?Ui.Muted:Ui.Border,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPadding);
+    var gbox=GroupBox(i);
+    int on=members.Count(x=>x.Checked);
+    DrawCheck(g,gbox,on>0&&on==members.Count,Enabled,on>0&&on<members.Count);
+    var nameRect=new Rectangle(gbox.Right+Ui.Px(14),row.Y,Math.Max(0,w-gbox.Right-Ui.Px(70)),h);
+    int nameWidth=TextRenderer.MeasureText(g,line.Group,Ui.UiSemibold,Size.Empty,TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding).Width;
+    TextRenderer.DrawText(g,line.Group,Ui.UiSemibold,nameRect,Enabled?Ui.TextColor:Ui.Muted,flags|TextFormatFlags.Left|TextFormatFlags.NoPadding);
+    string info=members.Count+(members.Count==1?" Programm":" Programme")+(on>0?", "+on+" ausgewählt":"");
+    int infoX=nameRect.X+Math.Min(nameWidth,nameRect.Width)+Ui.Px(12);
+    if(infoX<row.Right-Ui.Px(100))
+     TextRenderer.DrawText(g,info,Ui.SmallFont,new Rectangle(infoX,row.Y,row.Right-Ui.Px(52)-infoX,h),Ui.Muted,flags|TextFormatFlags.Left|TextFormatFlags.NoPadding);
+    continue;
    }
-   int pillX=nameRect.Right+Ui.Px(8),maxWidth=row.Right-pillX-Ui.Px(16);
+   var item=line.Row;
+   // Programme einer Gruppe etwas eingerückt.
+   int indent=GroupOf(item).Length>0?Ui.Px(24):0;
+   int cb=Ui.Px(18);
+   var box=new Rectangle(row.X+Ui.Px(16)+indent,row.Y+(h-cb)/2,cb,cb);
+   DrawCheck(g,box,item.Checked,Enabled);
+   var nameRect2=new Rectangle(box.Right+Ui.Px(14),row.Y,Ui.Px(170)-indent,h);
+   TextRenderer.DrawText(g,item.Name,Ui.UiSemibold,nameRect2,Enabled?Ui.TextColor:Ui.Muted,flags|TextFormatFlags.Left);
+   int pillX=nameRect2.Right+Ui.Px(8),maxWidth=row.Right-pillX-Ui.Px(16);
    if(maxWidth<Ui.Px(60))continue;
    Color color=Ui.StatusColor(item.Status);
    bool neutral=color==Ui.Muted;
    int textWidth=TextRenderer.MeasureText(g,item.Status,Ui.SmallFont,Size.Empty,TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding).Width;
-   int pillH=Ui.Px(26);
+   int pillH=Ui.Px(22);
    var pill=new Rectangle(pillX,row.Y+(h-pillH)/2,Math.Min(maxWidth,textWidth+Ui.Px(40)),pillH);
    using(var path=Ui.Round(pill,pillH/2))
    using(var brush=new SolidBrush(Ui.Blend(BackColor,color,neutral?0.08f:0.14f)))
    using(var pen=new Pen(Ui.Blend(BackColor,color,neutral?0.22f:0.32f))) {g.FillPath(brush,path);g.DrawPath(pen,path);}
-   int dot=Ui.Px(8);
-   var dotRect=new Rectangle(pill.X+Ui.Px(12),pill.Y+(pillH-dot)/2,dot,dot);
+   int dot=Ui.Px(7);
+   var dotRect=new Rectangle(pill.X+Ui.Px(10),pill.Y+(pillH-dot)/2,dot,dot);
    using(var brush=new SolidBrush(color)) g.FillEllipse(brush,dotRect);
    var textRect=new Rectangle(dotRect.Right+Ui.Px(8),pill.Y,pill.Right-dotRect.Right-Ui.Px(16),pillH);
    TextRenderer.DrawText(g,item.Status,Ui.SmallFont,textRect,neutral?Ui.Muted:Ui.Blend(color,Ui.Tint,Ui.Dark?0.25f:0.1f),flags|TextFormatFlags.Left|TextFormatFlags.NoPadding);
   }
+  // Ziehen: Einfügestelle als Linie in Akzentfarbe mit Punkt links (eingerückt, wenn sie in einer Gruppe landet).
+  if(dragging&&dropIndex>=0&&dragIndex>=0&&dragIndex<lines.Count) {
+   bool groupDrag=lines[dragIndex].Row==null;
+   int at=groupDrag?GroupDropLine(GroupAbove(dropIndex,lines[dragIndex].Group)):dropIndex;
+   int y=Math.Max(Ui.Px(2),Math.Min(ClientSize.Height-Ui.Px(2),offset+at*h));
+   bool inGroup=false;
+   if(!groupDrag)for(int i=dropIndex-1;i>=0;i--){if(i==dragIndex)continue;inGroup=lines[i].Row==null||GroupOf(lines[i].Row).Length>0;break;}
+   int r=Ui.Px(4),x=Ui.Px(10)+(inGroup?Ui.Px(24):0);
+   using(var pen=new Pen(Ui.Accent,Math.Max(2f,2f*Ui.S))) g.DrawLine(pen,x+r,y,w-Ui.Px(10),y);
+   using(var brush=new SolidBrush(Ui.Accent)) g.FillEllipse(brush,x-r,y-r,2*r,2*r);
+  }
  }
- internal static void DrawCheck(Graphics g,Rectangle box,bool on,bool enabled) {
+ internal static void DrawCheck(Graphics g,Rectangle box,bool on,bool enabled){DrawCheck(g,box,on,enabled,false);}
+ // mixed: einige Programme der Gruppe angehakt (Strich statt Haken).
+ internal static void DrawCheck(Graphics g,Rectangle box,bool on,bool enabled,bool mixed) {
   using(var path=Ui.Round(box,Ui.Px(4))) {
-   if(on) {
+   if(on||mixed) {
     using(var brush=new SolidBrush(enabled?Ui.Primary:Ui.Blend(Ui.Primary,Ui.Surface,0.5f))) g.FillPath(brush,path);
     using(var pen=new Pen(Ui.OnPrimary,Math.Max(1.5f,1.8f*Ui.S))) {
      pen.StartCap=LineCap.Round;pen.EndCap=LineCap.Round;pen.LineJoin=LineJoin.Round;
      float x=box.X,y=box.Y,s=box.Width;
-     g.DrawLines(pen,new[]{new PointF(x+s*0.26f,y+s*0.52f),new PointF(x+s*0.43f,y+s*0.69f),new PointF(x+s*0.75f,y+s*0.33f)});
+     if(mixed)g.DrawLine(pen,x+s*0.28f,y+s*0.5f,x+s*0.72f,y+s*0.5f);
+     else g.DrawLines(pen,new[]{new PointF(x+s*0.26f,y+s*0.52f),new PointF(x+s*0.43f,y+s*0.69f),new PointF(x+s*0.75f,y+s*0.33f)});
     }
    } else {
     using(var pen=new Pen(enabled?Ui.Muted:Ui.Border,Math.Max(1f,1.2f*Ui.S))) g.DrawPath(pen,path);

@@ -20,6 +20,8 @@ using System.Reflection;
 using System.Drawing.Drawing2D;
 
 namespace Fensterpositionen {
+// Sichtbares Fenster mit Titel (für "Programm hinzufügen" und "Einmalig ausrichten").
+public class TopWindow {public IntPtr Handle;public string Title;public int ProcessId;}
 public static class VisibleAlignment {
  [StructLayout(LayoutKind.Sequential)] public struct RECT {public int Left,Top,Right,Bottom;}
  [StructLayout(LayoutKind.Sequential)] public struct MONITORINFO {public int Size;public RECT Monitor,Work;public uint Flags;}
@@ -38,6 +40,7 @@ public static class VisibleAlignment {
   return text+" (Windows-Fehler "+error+": "+new System.ComponentModel.Win32Exception(error).Message+")";
  }
  public static IntPtr FindMain(Entry e) {
+  if(!String.IsNullOrEmpty(e.WindowTitle))return FindByTitle(e);
   foreach(string name in new[]{e.ProcessName,e.AltProcessName}) {
    if(String.IsNullOrEmpty(name))continue;
    foreach(var process in Process.GetProcessesByName(name))using(process){
@@ -69,6 +72,65 @@ public static class VisibleAlignment {
    return true;
   },IntPtr.Zero);
   return best;
+ }
+ // Fenster mit Titel (WindowTitle): erst genau gleicher Titel, sonst ein Titel, der ihn enthält; bei mehreren das
+ // größte. Ohne Treffer kein Fenster (nicht irgendein anderes Fenster des Programms, z.B. bei Steam die Freundesliste).
+ static IntPtr FindByTitle(Entry e) {
+  var ids=new HashSet<int>();
+  foreach(string name in new[]{e.ProcessName,e.AltProcessName}) {
+   if(String.IsNullOrEmpty(name))continue;
+   foreach(var process in Process.GetProcessesByName(name))using(process)ids.Add(process.Id);
+  }
+  if(ids.Count==0)return IntPtr.Zero;
+  var own=TitledWindows().Where(x=>ids.Contains(x.ProcessId)).ToList();
+  var matches=own.Where(x=>String.Equals(x.Title.Trim(),e.WindowTitle.Trim(),StringComparison.CurrentCultureIgnoreCase)).ToList();
+  if(matches.Count==0)matches=own.Where(x=>x.Title.IndexOf(e.WindowTitle.Trim(),StringComparison.CurrentCultureIgnoreCase)>=0).ToList();
+  IntPtr best=IntPtr.Zero;long bestArea=-1;
+  foreach(var window in matches) {
+   RECT r;
+   if(!GetWindowRect(window.Handle,out r))continue;
+   long area=(long)Math.Max(0,r.Right-r.Left)*Math.Max(0,r.Bottom-r.Top);
+   if(area>bestArea){bestArea=area;best=window.Handle;}
+  }
+  return best;
+ }
+ [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hwnd,uint cmd);
+ [DllImport("dwmapi.dll",EntryPoint="DwmGetWindowAttribute")] static extern int DwmGetCloaked(IntPtr hwnd,int attr,out int value,int size);
+ // Sichtbare Fenster mit Titel: ohne Werkzeugfenster, ohne Fenster mit Besitzer (Dialoge) und ohne versteckte
+ // ("cloaked") Fenster, z.B. im Hintergrund gehaltene Apps. Ein Programm kann mehrere haben (Steam: Hauptfenster, Freunde).
+ public static List<TopWindow> TitledWindows() {
+  var result=new List<TopWindow>();
+  var seen=new HashSet<IntPtr>();
+  EnumWindows((hwnd,lParam)=>{
+   if(!IsWindowVisible(hwnd))return true;
+   // Fenster mit Besitzer (Dialoge) und Werkzeugfenster nur, wenn sie ausdrücklich in die Taskleiste gehören (WS_EX_APPWINDOW).
+   int exStyle=GetWindowLong(hwnd,-20);
+   bool appWindow=(exStyle&0x40000)!=0;
+   if(!appWindow&&(GetWindow(hwnd,4)!=IntPtr.Zero||(exStyle&0x80)!=0))return true;
+   int cloaked;
+   if(DwmGetCloaked(hwnd,14,out cloaked,4)==0&&cloaked!=0)return true;
+   var title=new StringBuilder(256);
+   GetWindowText(hwnd,title,title.Capacity);
+   if(title.ToString().Trim().Length==0)return true;
+   uint id;
+   GetWindowThreadProcessId(hwnd,out id);
+   result.Add(new TopWindow{Handle=hwnd,Title=title.ToString(),ProcessId=(int)id});
+   seen.Add(hwnd);
+   return true;
+  },IntPtr.Zero);
+  // Zusätzlich das Hauptfenster jedes Programms, wie Windows es meldet (so wurde bis 2.51 gesucht),
+  // falls es oben durchs Raster gefallen ist.
+  foreach(var process in Process.GetProcesses()) using(process) {
+   try {
+    IntPtr hwnd=process.MainWindowHandle;
+    if(hwnd==IntPtr.Zero||seen.Contains(hwnd)||!IsWindowVisible(hwnd))continue;
+    string title=process.MainWindowTitle;
+    if(String.IsNullOrEmpty(title)||title.Trim().Length==0)continue;
+    result.Add(new TopWindow{Handle=hwnd,Title=title,ProcessId=process.Id});
+    seen.Add(hwnd);
+   } catch {}
+  }
+  return result;
  }
  public static string AlignEntry(Entry e,int gap,string edges){return AlignHandle(FindMain(e),gap,edges);}
  delegate bool EnumWindowsProc(IntPtr hwnd,IntPtr lParam);

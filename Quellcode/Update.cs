@@ -44,16 +44,30 @@ public static class Updater {
   request.Accept="application/vnd.github+json";
   request.Timeout=15000;request.ReadWriteTimeout=15000;
   string json;
+  // Fehler als feste Kurzmeldung (Message) mit technischem Originaltext für "Details" (Globale Richtlinien, Updates).
   try {
    using(var response=(HttpWebResponse)request.GetResponse())
    using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8)) json=reader.ReadToEnd();
   } catch(WebException ex) {
    var http=ex.Response as HttpWebResponse;
-   if(http!=null&&http.StatusCode==HttpStatusCode.NotFound)throw new Exception("Auf GitHub ist noch keine Version veröffentlicht.");
-   if(http!=null&&(int)http.StatusCode==403)throw new Exception("GitHub hat die Anfrage abgelehnt (zu viele Anfragen). Später erneut versuchen.");
-   throw new Exception("GitHub nicht erreichbar: "+ex.Message);
+   if(http!=null&&http.StatusCode==HttpStatusCode.NotFound) {
+    // /releases/latest kennt nur fertige Versionen: "Nur Vorabversionen" ist kein Fehler.
+    var pre=new Exception("Nur Vorabversionen");
+    pre.Data["Prerelease"]=true;
+    throw pre;
+   }
+   string detail=ex.Message;
+   if(ex.InnerException!=null&&ex.InnerException.Message!=ex.Message)detail+="\r\n"+ex.InnerException.Message;
+   if(http!=null&&(int)http.StatusCode==403)throw Fail("Zu viele Anfragen.",detail);
+   if(ex.Status==WebExceptionStatus.NameResolutionFailure||ex.Status==WebExceptionStatus.ProxyNameResolutionFailure||ex.Status==WebExceptionStatus.ConnectFailure)throw Fail("Keine Verbindung.",detail);
+   if(ex.Status==WebExceptionStatus.Timeout)throw Fail("Keine Antwort.",detail);
+   throw Fail("Nicht erreichbar.",detail);
+  } catch(IOException ex) {
+   throw new Exception(ex.Message); // unbekannter Fehler: nur "Details"
   }
-  var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);
+  Dictionary<string,object> data;
+  try {data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);} catch {data=null;}
+  if(data==null)throw Fail("Antwort unlesbar.",null);
   var info=new ReleaseInfo{PageUrl=ReleasesPage};
   object value;
   if(data.TryGetValue("tag_name",out value)&&value!=null)info.Version=Convert.ToString(value).TrimStart('v','V');
@@ -66,8 +80,15 @@ public static class Updater {
     if(Convert.ToString(asset["name"]).EndsWith(".zip",StringComparison.OrdinalIgnoreCase)){info.ZipUrl=Convert.ToString(asset["browser_download_url"]);break;}
    }
   }
-  if(String.IsNullOrEmpty(info.Version))throw new Exception("Antwort von GitHub ohne Versionsnummer.");
+  Version parsed;
+  if(String.IsNullOrEmpty(info.Version)||!System.Version.TryParse(info.Version,out parsed))throw Fail("Antwort unlesbar.",null); // ohne "Details"
   return info;
+ }
+ // Feste Kurzmeldung mit technischem Originaltext für "Details" (null = ohne "Details").
+ static Exception Fail(string message,string detail) {
+  var ex=new Exception(message);
+  ex.Data["Detail"]=detail??"";
+  return ex;
  }
 
  // true, wenn remote neuer ist als die laufende Version.
