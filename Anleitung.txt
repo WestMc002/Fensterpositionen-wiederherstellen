@@ -1,6 +1,6 @@
 ﻿FENSTERPOSITIONEN
 ================
-Version 2.64 (Build-Datum wird angehängt, z.B. 2.64.2026.1116)
+Version 2.65 (Build-Datum wird angehängt, z.B. 2.65.2026.1118)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte (Programmliste und Positionen) verwendet, solange noch keine eigenen
@@ -670,6 +670,8 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.65           Fußzeile: Abstand der beiden Zeilen rechts je nach Skalierung
+               (100 % 1 px, 125 % 2 px, ab 150 % 3 × Skalierung enger).
 2.64           Fußzeile: Name und Website rechts etwas enger gesetzt, damit
                der Textblock nicht höher wirkt als das GS-Logo.
 2.52 bis 2.63  Programmliste in Positionen.json ("_programme"): keine fest

@@ -910,9 +910,11 @@ public class FooterPanel:Control {
    Size s1=TextRenderer.MeasureText(g,Name1,f1,Size.Empty,flags);
    Size s2=TextRenderer.MeasureText(g,Name2,f2,Size.Empty,flags);
    int tw=Math.Max(s1.Width,s2.Width);
-   // Globale Richtlinien (Footer, 16.11.2026): Zeilen um 3 × Skalierung überlappen, weil die mit NoPadding
-   // gemessene Höhe Leerraum für Ober- und Unterlängen enthält; sonst wirkt der Textblock höher als das Logo.
-   int gap=-Ui.Px(3);
+   // Globale Richtlinien (Footer, 18.11.2026): Zeilen überlappen, weil die mit NoPadding gemessene Höhe
+   // Leerraum für Ober- und Unterlängen enthält; sonst wirkt der Textblock höher als das Logo.
+   // Abgestuft: 100 % 1 px, 125 % 2 px, ab 150 % 3 × Skalierung (bei kleiner Schrift wären 3 px zu viel).
+   float k=Ui.S;
+   int gap=k>=1.5f?-(int)Math.Round(3*k):(k>=1.25f?-2:-1);
    int th=s1.Height+gap+s2.Height;
    int top=(Height-th)/2;
    int tx=right-tw;
