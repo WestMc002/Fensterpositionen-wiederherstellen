@@ -41,7 +41,9 @@ public static class Ui {
  public static float S=1f;
  public static int Px(float value){return (int)Math.Round(value*S);}
  // Hintergrund hinter einem Steuerelement: eine Card zeichnet ihre Fläche selbst (Surface), ihr BackColor ist das Fenster.
- public static Color ParentFill(Control c){return c.Parent is Card?Surface:c.Parent!=null?c.Parent.BackColor:Bg;}
+ // Hintergrund hinter einem Knopf: Karte = Kartenfarbe, Hinweisleiste = ihre getönte Fläche (sonst stünde z.B.
+ // „Später“ als heller Kasten auf der Leiste), sonst die Farbe des übergeordneten Elements.
+ public static Color ParentFill(Control c){return c.Parent is Card?Surface:c.Parent is UpdateBar?UpdateBar.Fill:c.Parent!=null?c.Parent.BackColor:Bg;}
  public static bool Dark=true;
  public static Color Bg,Surface,Surface2,SurfaceHover,Border,TextColor,Muted,Accent,LogText,InfoText,Tint;
  public static Color SuccessColor,ErrorColor,WarningColor;

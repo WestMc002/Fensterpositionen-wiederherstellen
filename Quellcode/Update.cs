@@ -193,6 +193,8 @@ public class UpdateBar:Control {
   BackColor=Ui.Bg;
   foreach(var b in new[]{Install,Page,Later}){b.Margin=new Padding(0);Controls.Add(b);}
  }
+ // Getönte Fläche der Leiste; die Knöpfe darauf malen ihren Hintergrund in dieser Farbe (Ui.ParentFill).
+ public static Color Fill{get{return Ui.Blend(Ui.Bg,Ui.Accent,0.14f);}}
  protected override void OnTextChanged(EventArgs e){base.OnTextChanged(e);Invalidate();}
  protected override void OnLayout(LayoutEventArgs e) {
   base.OnLayout(e);
@@ -209,7 +211,7 @@ public class UpdateBar:Control {
   g.SmoothingMode=SmoothingMode.AntiAlias;
   var r=new Rectangle(0,0,Width-1,Height-1);
   using(var path=Ui.Round(r,Ui.Px(8)))
-  using(var brush=new SolidBrush(Ui.Blend(Ui.Bg,Ui.Accent,0.14f)))
+  using(var brush=new SolidBrush(Fill))
   using(var pen=new Pen(Ui.Blend(Ui.Bg,Ui.Accent,0.45f))) {g.FillPath(brush,path);g.DrawPath(pen,path);}
   int x=Ui.Px(16);
   if(Ui.IconFont!=null) {
