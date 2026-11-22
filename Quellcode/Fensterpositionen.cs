@@ -45,7 +45,13 @@ static class Program {
    return;
   }
   // Neustart durch das Update-Skript: Ergebnis des Updates ins Protokoll schreiben.
-  if(args.Any(x=>x=="--nach-update"))MainForm.AfterUpdate=true;
+  // "--nach-update [<Kennung>] [/tray]": Kennung des Versuchs (32 Hex-Zeichen, ab 2.68; das Ergebnis steht in einer
+  // eigenen Datei je Versuch). /tray wird ignoriert (kein Infobereich).
+  int after=Array.FindIndex(args,x=>String.Equals(x,"--nach-update",StringComparison.OrdinalIgnoreCase));
+  if(after>=0) {
+   MainForm.AfterUpdate=true;
+   if(after+1<args.Length&&Updater.IsAttemptId(args[after+1]))MainForm.UpdateAttemptId=args[after+1];
+  }
   // Verknüpfung "Fenster wiederherstellen": --wiederherstellen [Anordnung] stellt minimiert wieder her und beendet sich bei Erfolg.
   int restore=Array.IndexOf(args,"--wiederherstellen");
   if(restore>=0) {

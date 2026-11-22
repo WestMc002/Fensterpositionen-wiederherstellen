@@ -59,7 +59,7 @@ public class AboutForm:FixedSizeForm {
   backupButton.Click+=openBackups;
   var traceButton=new ModernButton("Protokolle",ButtonKind.Secondary,"\uE81C");
   traceButton.Click+=(s,e)=>{
-   try{Directory.CreateDirectory(TraceLog.Folder);Process.Start("explorer.exe","\""+TraceLog.Folder+"\"");}
+   try{Directory.CreateDirectory(TraceLog.Folder);Process.Start(Store.ExplorerExe,"\""+TraceLog.Folder+"\"");}
    catch(Exception ex){MessageBox.Show(this,ex.Message);}
   };
   var closeButton=new ModernButton("Schließen",ButtonKind.Primary,null);
@@ -1205,48 +1205,147 @@ public class AlignRulesForm:FixedSizeForm {
 }
 // Einzelnes Häkchen (wie in der Programmliste), anklickbar und per Leertaste umschaltbar.
 // Vorschau beim Import (Globale Richtlinien, Sicherung wiederherstellen; ab 2.67): alle Programme der Datei mit
-// Ziel und Parametern. Programme mit Netzwerkpfad und Sonderfälle sind hervorgehoben und werden nur mit dem
-// eigenen Schalter übernommen (Standard aus); Vorauswahl ist „Abbrechen“.
+// vollständigem Startbefehl (Programmdatei und Parameter) und Schreibziel (Positionsdatei mit Feldern bzw.
+// Registry-Schlüssel mit Wertnamen). Programme mit Netzwerkpfad/indirektem Ziel und Sonderfälle werden nur mit dem
+// eigenen Schalter übernommen (Standard aus). Ab 2.68 gelten Startbefehl und Schreibziel eines Eintrags nur, wenn
+// sie schon so auf diesem PC stehen oder der Eintrag hier angehakt (freigegeben) ist; Vorauswahl ist „Abbrechen“.
 public class ImportPreviewForm:FixedSizeForm {
  readonly ListBox items=new ListBox();
  readonly CheckCell network=new CheckCell(),special=new CheckCell();
+ readonly ModernToolTip tips=new ModernToolTip();
+ int tipIndex=-1;
  public bool Network{get{return network.Checked;}}
  public bool Special{get{return special.Checked;}}
+ // Freigaben je Datensatz (ImportItem.Key: Id und alle Aktionsfelder)
+ public List<string> ApprovedIds{get{return items.Items.Cast<ImportItem>().Where(x=>x.Approved).Select(x=>x.Key).ToList();}}
+ const TextFormatFlags Wrap=TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix|TextFormatFlags.Left|TextFormatFlags.NoPadding|TextFormatFlags.TextBoxControl;
  public ImportPreviewForm(Icon icon,string file,List<ImportItem> programs,int arrangements) {
   Text="Einstellungen importieren";
   StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
   Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
-  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(4),inner=w-2*pad;
+  int w=Ui.Px(700),pad=Ui.Px(24),y=Ui.Px(4),inner=w-2*pad;
   int networkCount=programs.Count(x=>x.Network),specialCount=programs.Count(x=>x.Special!=null);
   var intro=new Label{Text="„"+Path.GetFileName(file)+"“: "+programs.Count+" Programm"+(programs.Count==1?"":"e")+", "+arrangements+" Anordnung"+(arrangements==1?"":"en")+". "+
    "Programmliste, Positionen, Kanten und Anordnungen werden ersetzt; Update-Einstellungen und Navigation bleiben wie auf diesem PC. "+
-   "Die bisherigen Einstellungen werden vorher im Ordner Sicherungen abgelegt, danach startet "+AppInfo.Product+" neu.",
-   Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(58))};
+   "Startbefehl und Schreibziel eines Programms gelten nur, wenn sie schon so auf diesem PC stehen oder hier angehakt sind – sonst bleiben die Angaben dieses PCs bzw. nur die Fensterposition. "+
+   "Die bisherigen Einstellungen werden vorher gesichert, danach startet "+AppInfo.Product+" neu.",
+   Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(76))};
   Controls.Add(intro);
-  y+=Ui.Px(64);
-  var listCard=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(268)),Padding=new Padding(Ui.Px(4))};
+  y+=Ui.Px(82);
+  var listCard=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(320)),Padding=new Padding(Ui.Px(4))};
+  textWidth=Math.Max(Ui.Px(100),inner-Ui.Px(8)-SystemInformation.VerticalScrollBarWidth-Ui.Px(2*2+44+10));
   items.Dock=DockStyle.Fill;items.BorderStyle=BorderStyle.None;items.IntegralHeight=false;
-  items.DrawMode=DrawMode.OwnerDrawFixed;items.ItemHeight=Ui.Px(44);
+  items.DrawMode=DrawMode.OwnerDrawVariable;
   items.BackColor=Ui.Surface;items.ForeColor=Ui.TextColor;
+  items.MeasureItem+=MeasureItem;
   items.DrawItem+=DrawItem;
   items.HandleCreated+=(s,e)=>Native.DarkScroll(items);
+  // Haken per Klick auf die Zeile oder Leertaste; nur bei Einträgen, die eine Freigabe brauchen.
+  items.MouseClick+=(s,e)=>{int i=items.IndexFromPoint(e.Location);if(i>=0)Toggle(i);};
+  items.KeyDown+=(s,e)=>{if(e.KeyCode==Keys.Space&&items.SelectedIndex>=0){Toggle(items.SelectedIndex);e.Handled=true;}};
+  // Volltext (ohne Zeilenkürzung) als Tooltip
+  items.MouseMove+=(s,e)=>{
+   int i=items.IndexFromPoint(e.Location);
+   if(i==tipIndex)return;
+   tipIndex=i;
+   tips.SetToolTip(items,i>=0?Describe((ImportItem)items.Items[i]):"");
+  };
   foreach(var item in programs)items.Items.Add(item);
   listCard.Controls.Add(items);
   Controls.Add(listCard);
   y+=listCard.Height+Ui.Px(14);
-  y=AddSwitch(network,"Programme mit Netzwerkpfad übernehmen ("+networkCount+") – Windows meldet sich dabei eventuell mit deinem Benutzerkonto am Server an",networkCount>0,pad,y,inner);
-  y=AddSwitch(special,"Sonderfälle übernehmen ("+specialCount+") – Dienst neu starten, geplante Aufgabe beenden (braucht Administratorrechte)",specialCount>0,pad,y,inner);
+  y=AddSwitch(network,"Programme mit Netzwerkpfad oder indirektem Ziel übernehmen ("+networkCount+") – Windows meldet sich dabei eventuell mit deinem Benutzerkonto am Server an",networkCount>0,pad,y,inner);
+  y=AddSwitch(special,"Sonderfälle freigegebener Programme übernehmen ("+specialCount+") – Dienst neu starten, geplante Aufgabe beenden",specialCount>0,pad,y,inner);
   y+=Ui.Px(14);
+  var all=new ModernButton("Alle anhaken",ButtonKind.Secondary,null);
+  all.Location=new Point(pad,y);
+  all.Enabled=programs.Any(NeedsApproval);
+  all.Click+=(s,e)=>{foreach(ImportItem item in items.Items)if(NeedsApproval(item))item.Approved=true;items.Invalidate();};
   var import=new ModernButton("Importieren",ButtonKind.Primary,null);
   var cancel=new ModernButton("Abbrechen",ButtonKind.Secondary,null);
   import.DialogResult=DialogResult.OK;cancel.DialogResult=DialogResult.Cancel;
   import.Location=new Point(w-pad-import.Width,y);
   cancel.Location=new Point(import.Left-Ui.Px(10)-cancel.Width,y);
-  Controls.Add(cancel);Controls.Add(import);
+  Controls.Add(all);Controls.Add(cancel);Controls.Add(import);
   CancelButton=cancel;AcceptButton=cancel;
   y+=Ui.Px(38)+Ui.Px(20);
   ClientSize=new Size(w,y);
   ActiveControl=cancel;
+  FormClosed+=(s,e)=>tips.Dispose();
+ }
+ // Freigabe nötig: Startbefehl/Schreibziel weicht von diesem PC ab und ist zugelassen.
+ static bool NeedsApproval(ImportItem item){return !item.Known&&item.Blocked==null;}
+ void Toggle(int index) {
+  var item=(ImportItem)items.Items[index];
+  if(!NeedsApproval(item))return;
+  item.Approved=!item.Approved;
+  items.Invalidate(items.GetItemRectangle(index));
+ }
+ static string StartText(ImportItem item){return item.Start.Length>0?"Start: "+item.Start:"Start: –";}
+ static string TargetText(ImportItem item){return item.Target.Length>0?"Schreibt: "+item.Target:"Schreibt: nur Fensterposition";}
+ static string StatusText(ImportItem item) {
+  if(item.Blocked!=null)return "Nicht zugelassen: "+item.Blocked+" – "+(item.Local?"es bleiben die Angaben dieses PCs.":"nur die Fensterposition wird übernommen.");
+  if(item.Known)return "Wie auf diesem PC.";
+  if(item.Approved)return "Freigegeben: Startbefehl und Schreibziel aus der Datei.";
+  return item.Local?"Nicht angehakt: Startbefehl und Schreibziel bleiben wie auf diesem PC.":"Nicht angehakt: nur Name, Gruppe und Fensterposition – kein Start, kein Schreibziel.";
+ }
+ static string Notes(ImportItem item) {
+  var notes=new List<string>();
+  if(item.Network)notes.Add(item.Indirect?"Indirektes Ziel":"Netzwerkpfad");
+  if(item.Special!=null)notes.Add("Sonderfall: "+item.Special);
+  return String.Join(" · ",notes);
+ }
+ static string Describe(ImportItem item) {
+  string notes=Notes(item);
+  return item.Name+(String.IsNullOrEmpty(item.Group)?"":" (Gruppe "+item.Group+")")+"\r\n"+StartText(item)+"\r\n"+TargetText(item)+(notes.Length>0?"\r\n"+notes:"")+"\r\n"+StatusText(item);
+ }
+ // Textbreite fest aus der Breite der Liste (MeasureItem läuft schon beim Hinzufügen, vor dem Layout)
+ int textWidth;
+ int TextWidth(){return textWidth;}
+ int TextHeight(string text,Font font){return TextRenderer.MeasureText(text,font,new Size(textWidth,Int32.MaxValue),Wrap).Height;}
+ void MeasureItem(object sender,MeasureItemEventArgs e) {
+  if(e.Index<0||e.Index>=items.Items.Count)return;
+  var item=(ImportItem)items.Items[e.Index];
+  string notes=Notes(item);
+  int h=Ui.Px(6)+Ui.Px(20)+TextHeight(StartText(item),Ui.SmallFont)+TextHeight(TargetText(item),Ui.SmallFont)+(notes.Length>0?TextHeight(notes,Ui.SmallFont):0)+TextHeight(StatusText(item),Ui.SmallFont)+Ui.Px(8);
+  e.ItemHeight=Math.Min(255,h);
+ }
+ void DrawItem(object sender,DrawItemEventArgs e) {
+  var g=e.Graphics;
+  using(var back=new SolidBrush(Ui.Surface)) g.FillRectangle(back,e.Bounds);
+  if(e.Index<0||e.Index>=items.Items.Count)return;
+  var item=(ImportItem)items.Items[e.Index];
+  var r=Rectangle.Inflate(e.Bounds,-Ui.Px(2),-Ui.Px(2));
+  bool selected=(e.State&DrawItemState.Selected)==DrawItemState.Selected;
+  g.SmoothingMode=SmoothingMode.AntiAlias;
+  if(selected)
+   using(var path=Ui.Round(r,Ui.Px(4)))
+   using(var brush=new SolidBrush(Ui.Blend(Ui.Surface,Ui.Accent,0.10f))) g.FillPath(brush,path);
+  // Kästchen links: nur bei Einträgen, die eine Freigabe brauchen
+  var box=new Rectangle(r.X+Ui.Px(12),r.Y+Ui.Px(6),Ui.Px(18),Ui.Px(18));
+  if(NeedsApproval(item)) {
+   using(var path=Ui.Round(box,Ui.Px(4))) {
+    if(item.Approved){using(var brush=new SolidBrush(Ui.Accent))g.FillPath(brush,path);}
+    else using(var pen=new Pen(Ui.Muted,Math.Max(1f,Ui.S))) g.DrawPath(pen,path);
+   }
+   if(item.Approved)
+    using(var pen=new Pen(Ui.OnPrimary,Math.Max(1.5f,1.6f*Ui.S))) g.DrawLines(pen,new[]{new Point(box.X+Ui.Px(4),box.Y+Ui.Px(9)),new Point(box.X+Ui.Px(8),box.Y+Ui.Px(13)),new Point(box.X+Ui.Px(14),box.Y+Ui.Px(5))});
+  }
+  var one=TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.EndEllipsis|TextFormatFlags.Left|TextFormatFlags.NoPadding;
+  int x=r.X+Ui.Px(44),width=TextWidth(),top=r.Y+Ui.Px(4);
+  TextRenderer.DrawText(g,item.Name+(String.IsNullOrEmpty(item.Group)?"":" · "+item.Group),Ui.UiSemibold,new Rectangle(x,top,width,Ui.Px(20)),Ui.TextColor,one);
+  top+=Ui.Px(22);
+  Color warn=Ui.WarningColor;
+  foreach(var part in new[]{
+   Tuple.Create(StartText(item),item.Network&&item.Start.Length>0?warn:Ui.Muted),
+   Tuple.Create(TargetText(item),Ui.Muted),
+   Tuple.Create(Notes(item),warn),
+   Tuple.Create(StatusText(item),item.Blocked!=null?warn:item.Known||item.Approved?Ui.TextColor:Ui.Muted)}) {
+   if(part.Item1.Length==0)continue;
+   int h=TextHeight(part.Item1,Ui.SmallFont);
+   TextRenderer.DrawText(g,part.Item1,Ui.SmallFont,new Rectangle(x,top,width,h),part.Item2,Wrap);
+   top+=h;
+  }
  }
  int AddSwitch(CheckCell box,string text,bool enabled,int pad,int y,int inner) {
   box.BackColor=Ui.Bg;box.Enabled=enabled;box.Bounds=new Rectangle(pad-Ui.Px(6),y,Ui.Px(30),Ui.Px(28));
@@ -1256,24 +1355,39 @@ public class ImportPreviewForm:FixedSizeForm {
   Controls.Add(box);Controls.Add(label);
   return y+Ui.Px(30);
  }
- void DrawItem(object sender,DrawItemEventArgs e) {
-  var g=e.Graphics;
-  using(var back=new SolidBrush(Ui.Surface)) g.FillRectangle(back,e.Bounds);
-  if(e.Index<0||e.Index>=items.Items.Count)return;
-  var item=(ImportItem)items.Items[e.Index];
-  var r=Rectangle.Inflate(e.Bounds,-Ui.Px(2),-Ui.Px(2));
-  var flags=TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.EndEllipsis|TextFormatFlags.Left|TextFormatFlags.NoPadding;
-  int x=r.X+Ui.Px(14),width=r.Width-Ui.Px(24);
-  // Hinweise rechts in der ersten Zeile (Warnfarbe), Name links davon.
-  var notes=new List<string>();
-  if(item.Network)notes.Add("Netzwerkpfad");
-  if(item.Special!=null)notes.Add("Sonderfall: "+item.Special);
-  string note=String.Join(" · ",notes);
-  int noteWidth=note.Length==0?0:Math.Min(width*3/5,TextRenderer.MeasureText(g,note,Ui.SmallFont,Size.Empty,flags).Width+Ui.Px(2));
-  if(noteWidth>0)TextRenderer.DrawText(g,note,Ui.SmallFont,new Rectangle(x+width-noteWidth,r.Y+Ui.Px(5),noteWidth,Ui.Px(18)),Ui.WarningColor,flags|TextFormatFlags.Right);
-  string name=item.Name+(String.IsNullOrEmpty(item.Group)?"":" · "+item.Group);
-  TextRenderer.DrawText(g,name,Ui.UiSemibold,new Rectangle(x,r.Y+Ui.Px(4),width-noteWidth-(noteWidth>0?Ui.Px(12):0),Ui.Px(20)),Ui.TextColor,flags);
-  TextRenderer.DrawText(g,item.Target,Ui.SmallFont,new Rectangle(x,r.Y+Ui.Px(22),width,Ui.Px(18)),item.Network?Ui.WarningColor:Ui.Muted,flags);
+}
+// Rückfrage vor dem erzwungenen Beenden (ab 2.68): Das Programm reagiert nicht auf das normale Schließen (z.B.
+// Discord bleibt im Infobereich). Vorausgewählt ist „Nicht beenden“; „Immer ohne Rückfrage“ setzt "ForceKill".
+public class ForceKillForm:FixedSizeForm {
+ public string Answer;
+ public ForceKillForm(Icon icon,string name,string process,List<string> ids) {
+  Text="Programm beenden";
+  StartPosition=FormStartPosition.CenterScreen;TopMost=true;AutoScaleMode=AutoScaleMode.None;
+  Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
+  int w=Ui.Px(560),pad=Ui.Px(24),y=Ui.Px(16),inner=w-2*pad;
+  var title=new Label{Text="„"+name+"“ reagiert nicht auf das normale Schließen.",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Bg,UseMnemonic=false,AutoEllipsis=true,Bounds=new Rectangle(pad,y,inner,Ui.Px(24))};
+  Controls.Add(title);
+  y+=Ui.Px(30);
+  var text=new Label{Text="Damit die Position gespeichert bzw. wiederhergestellt werden kann, muss das Programm beendet sein. "+
+   "„Beenden“ beendet genau diese Prozesse ("+process+".exe, PID "+String.Join(", ",ids.ToArray())+"); ungespeicherte Daten darin gehen verloren. "+
+   "„Immer ohne Rückfrage“ merkt sich das für dieses Programm (\"ForceKill\" in Positionen.json).",
+   Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(76))};
+  Controls.Add(text);
+  y+=Ui.Px(88);
+  var always=new ModernButton("Immer ohne Rückfrage",ButtonKind.Secondary,null);
+  var keep=new ModernButton("Nicht beenden",ButtonKind.Secondary,null);
+  var kill=new ModernButton("Beenden",ButtonKind.Primary,null);
+  always.Location=new Point(pad,y);
+  kill.Location=new Point(w-pad-kill.Width,y);
+  keep.Location=new Point(kill.Left-Ui.Px(10)-keep.Width,y);
+  always.Click+=(s,e)=>{Answer="immer";DialogResult=DialogResult.OK;};
+  kill.Click+=(s,e)=>{Answer="einmal";DialogResult=DialogResult.OK;};
+  keep.DialogResult=DialogResult.Cancel;
+  Controls.Add(always);Controls.Add(keep);Controls.Add(kill);
+  CancelButton=keep;AcceptButton=keep;
+  y+=Ui.Px(38)+Ui.Px(20);
+  ClientSize=new Size(w,y);
+  ActiveControl=keep;
  }
 }
 public class CheckCell:Control {

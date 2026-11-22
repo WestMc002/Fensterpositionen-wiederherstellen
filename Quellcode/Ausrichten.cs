@@ -227,8 +227,8 @@ public static class VisibleAlignment {
   if(handle==IntPtr.Zero) {
    // Eigene Programme ohne bekannte Programmdatei können nicht gestartet werden.
    if(String.IsNullOrEmpty(e.Exe))throw new Exception("Kein offenes Fenster gefunden. "+e.Name+" bitte zuerst öffnen.");
-   if(!System.IO.File.Exists(e.Exe))throw new FileNotFoundException("Programmdatei fehlt: "+e.Exe);
-   Process.Start(new ProcessStartInfo(e.Exe,e.Args??""){WorkingDirectory=Path.GetDirectoryName(e.Exe),UseShellExecute=true});
+   // Geprüfter Start wie beim Wiederherstellen (ab 2.68): nur .exe, Pfad unmittelbar vorher geprüft
+   Store.StartProgram(e);
    started=true;
    var timer=Stopwatch.StartNew();
    while(handle==IntPtr.Zero&&timer.ElapsedMilliseconds<30000){Thread.Sleep(500);handle=FindMain(e);}

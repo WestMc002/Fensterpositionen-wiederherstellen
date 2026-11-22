@@ -46,6 +46,8 @@ public class MainForm:Form {
  readonly System.Windows.Forms.Timer autoUpdateRetry=new System.Windows.Forms.Timer{Interval=5*60*1000};
  // Gesetzt beim Neustart nach einem Update (--nach-update).
  public static bool AfterUpdate;
+ // Versuchskennung aus „--nach-update <Kennung>“ (ab 2.68), sonst null: Ergebnis aus der Datei dieses Versuchs.
+ public static string UpdateAttemptId;
  ActivityBar activity=new ActivityBar();
  FooterPanel footer=new FooterPanel();
  Bitmap signature;
@@ -289,7 +291,7 @@ public class MainForm:Form {
   if(AfterUpdate) {
    // Ergebnis des Update-Skripts: OK, ZURUECK (vorherige Version wiederhergestellt), sonst nicht installiert.
    // Meldung ohne Pfade und Technik; der Originaltext steht nur in der Protokolldatei.
-   string result=Updater.LastResult();
+   string result=Updater.LastResult(UpdateAttemptId);
    if(result!=null&&result.StartsWith("OK"))Log("Update auf Version "+result.Substring(2).Trim()+" installiert.");
    else if(result!=null&&result.StartsWith("ZURUECK"))Log("Vorherige Version wiederhergestellt – das Update kann jetzt erneut installiert werden.");
    else if(result!=null) {
@@ -511,7 +513,7 @@ public class MainForm:Form {
  }
  void SettingsMenuOpened(object sender,EventArgs e){MenuStyle.RoundCorners(settingsMenu);}
  void OpenFolder(string path) {
-  try {Directory.CreateDirectory(path);Process.Start("explorer.exe",Quote(path));}
+  try {Directory.CreateDirectory(path);Process.Start(Store.ExplorerExe,Quote(path));}
   catch(Exception ex) {MessageBox.Show(this,ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);}
  }
 
@@ -593,7 +595,7 @@ public class MainForm:Form {
 
  // Das Logo kommt aus der eingebetteten ICO-Datei (Erstellen.bat) oder aus Resources\Fensterpositionen.ico.
  // Die ICO enthält PNG-Bilder; Icon.ToBitmap liest diese nicht zuverlässig, daher eigener Leser.
- void OpenBackups(object sender,EventArgs e){string p=Path.Combine(Store.Root,"Sicherungen");Directory.CreateDirectory(p);Process.Start("explorer.exe",Quote(p));}
+ void OpenBackups(object sender,EventArgs e){string p=Path.Combine(Store.Root,"Sicherungen");Directory.CreateDirectory(p);Process.Start(Store.ExplorerExe,Quote(p));}
  static bool IsElevated() {
   try {
    using(var identity=System.Security.Principal.WindowsIdentity.GetCurrent())
@@ -683,7 +685,8 @@ public class MainForm:Form {
   if(!manual&&(!UpdateAuto()||(!atStart&&(DateTime.UtcNow-UpdateLast().ToUniversalTime()).TotalHours<20)))return CurrentUpdateStatus();
   updateRunning=true;
   try {
-   var release=await Task.Run(()=>Updater.GetLatest());
+   // Reste unterbrochener Updates, bei denen nichts zurückzusetzen ist, still aufräumen (nur unter der Sperre)
+   var release=await Task.Run(()=>{Updater.QuietCleanup();return Updater.GetLatest();});
    SaveUpdateSettings(null,DateTime.UtcNow,null);
    updateError=null;
    if(Updater.IsNewer(release.Version)) {
@@ -762,6 +765,7 @@ public class MainForm:Form {
    MessageBox.Show(this,"Ein Update läuft bereits.","Update",MessageBoxButtons.OK,MessageBoxIcon.Information);
    return;
   }
+  Updater.QuietCleanup();
   if(!automatic&&Updater.RepairPending) {
    // Ein früheres Update wurde nicht abgeschlossen: erst die vorherige Version wiederherstellen.
    if(Updater.OfferRepair(this,false)) {
@@ -1223,7 +1227,10 @@ public class MainForm:Form {
  static bool Installed(Entry e) {
   if(String.IsNullOrEmpty(e.Exe))return true;
   try {
-   if(!String.IsNullOrEmpty(e.Exe)&&System.IO.File.Exists(e.Exe))return true;
+   // Ab 2.68 erst die Pfadprüfung (Netzwerk/Reparse Point ohne Freigabe: kein Zugriff, Eintrag bleibt sichtbar,
+   // der Start meldet dann den Grund), dann nachsehen, ob die Datei vorhanden ist.
+   if(Store.ProgramPathProblem(e)!=null)return true;
+   if(Store.ProgramFileExists(e))return true;
    foreach(string name in new[]{e.ProcessName,e.AltProcessName}) {
     if(String.IsNullOrEmpty(name))continue;
     var running=Process.GetProcessesByName(name);
@@ -1488,15 +1495,17 @@ public class MainForm:Form {
    catch(Exception ex) {MessageBox.Show(this,"Die Datei kann nicht importiert werden.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
   }
   // Vorschau (ab 2.67): Netzwerkpfade und Sonderfälle nur mit eigenem Schalter, Vorauswahl „Abbrechen“.
+  // Ab 2.68: Startbefehle und Schreibziele nur „wie auf diesem PC“ oder je Eintrag freigegeben.
   bool network,special;
+  List<string> approved;
   using(var preview=new ImportPreviewForm(Icon,file,Store.AnalyzeImport(data),Store.Arrangements(data).Count+1)) {
    if(preview.ShowDialog(this)!=DialogResult.OK)return;
-   network=preview.Network;special=preview.Special;
+   network=preview.Network;special=preview.Special;approved=preview.ApprovedIds;
   }
   if(!ConfirmLeaveView())return;
   CloseView();
   string backup;
-  try {data=Store.PrepareImport(data,network,special);backup=Store.ReplaceSettings(data);}
+  try {data=Store.PrepareImport(data,network,special,approved);backup=Store.ReplaceSettings(data);}
   catch(Exception ex) {Log("Einstellungen konnten nicht importiert werden – "+ex.Message);MessageBox.Show(this,"Die Einstellungen konnten nicht importiert werden.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
   Log("Einstellungen importiert aus "+Store.Display(file)+(backup!=null?" – Sicherung der bisherigen: "+Store.Display(backup):"")+". Programm wird neu gestartet …");
   try {Process.Start(new ProcessStartInfo(Application.ExecutablePath){UseShellExecute=true,WorkingDirectory=AppDomain.CurrentDomain.BaseDirectory});}
@@ -1526,46 +1535,186 @@ public class MainForm:Form {
   Log("Programm entfernt: "+entry.Name);
  }
  // Protokoll im Fenster und zusätzlich als Tagesdatei in TraceLogs.
- void Log(string text){log.AppendText(DateTime.Now.ToString("HH:mm:ss")+"  "+text+Environment.NewLine);TraceLog.Write(text);}
+ // Eine Zeile je Eintrag: Zeilenumbrüche und Steuerzeichen (z.B. aus Fenstertiteln) werden maskiert (ab 2.68).
+ void Log(string text){log.AppendText(DateTime.Now.ToString("HH:mm:ss")+"  "+TraceLog.OneLine(text)+Environment.NewLine);TraceLog.Write(text);}
  bool Stop(Entry e) {
   // Geplante Aufgabe, die das Programm wieder startet, vorher beenden (EndTask, z.B. beim Task-Manager).
-  if(e.EndTask!=null) {
-   using(var task=Process.Start(new ProcessStartInfo("schtasks.exe","/End /TN "+Quote(e.EndTask)){CreateNoWindow=true,UseShellExecute=false,WindowStyle=ProcessWindowStyle.Hidden})) { task.WaitForExit(3000); }
-  }
+  // Ab 2.68 über die Aufgabenplanung (Schedule.Service) mit Prüfung: Scheitert das Beenden oder läuft die Aufgabe
+  // nach 5 Sekunden noch, bricht der Vorgang für dieses Programm ab, bevor etwas geändert wird.
+  if(e.EndTask!=null)EndScheduledTask(e.EndTask);
+  // Nur Prozesse dieses Programms (OwnProcesses); gleichnamige fremde Prozesse bleiben unberührt.
+  var skipped=new HashSet<string>();
   bool running=false;
-  var initial=Process.GetProcessesByName(e.ProcessName);
-  foreach(var p in initial) using(p) {
+  foreach(var p in OwnProcesses(e,skipped)) using(p) {
    try { if(!p.HasExited){running=true;p.CloseMainWindow();} }
    catch(InvalidOperationException){}
   }
+  if(skipped.Count>0) {
+   string pids=String.Join(", ",skipped.ToArray());
+   BeginInvoke((Action)(()=>Log(e.Name+": gleichnamige Prozesse aus einem anderen Ordner bzw. einer anderen Sitzung bleiben unberührt (PID: "+pids+").")));
+  }
   if(!running)return false;
   // Electron applications may hide in the tray and spawn helper processes.
-  // Allow a normal exit first, then repeatedly collect and stop remaining processes.
+  // Allow a normal exit first, then repeatedly collect and stop remaining processes of this program.
+  // Erzwungen beendet wird ab 2.68 nur mit "ForceKill" oder nach Rückfrage, und dann nur genau die Prozesse,
+  // die die Rückfrage genannt hat (Prozess-ID und Startzeit); später neu gestartete bleiben unberührt.
   var timer=Stopwatch.StartNew();
+  HashSet<string> confirmed=new HashSet<string>();
+  bool force=false;
   while(timer.ElapsedMilliseconds<20000) {
-   var processes=Process.GetProcessesByName(e.ProcessName);
-   if(processes.Length==0) {
+   var processes=OwnProcesses(e,null);
+   if(processes.Count==0) {
     Thread.Sleep(500);
-    var check=Process.GetProcessesByName(e.ProcessName);
-    bool empty=check.Length==0;
+    var check=OwnProcesses(e,null);
+    bool empty=check.Count==0;
     foreach(var p in check)p.Dispose();
     if(empty)return true;
     continue;
    }
+   if(!force&&timer.ElapsedMilliseconds>=2500) {
+    // Zielmenge einmal je Durchlauf festlegen – auch mit "ForceKill" (das spart nur die Rückfrage). Prozesse ohne
+    // lesbare Startzeit gehören nie dazu (ab 2.68).
+    var keys=new HashSet<string>(processes.Select(ProcessKey).Where(x=>x!=null));
+    if(!e.ForceKill) {
+     string answer=AskForceKill(e,processes);
+     if(answer==null) {
+      foreach(var p in processes)p.Dispose();
+      throw new Exception("Nicht beendet – reagiert nicht auf das normale Schließen. Bitte selbst beenden und erneut versuchen.");
+     }
+    }
+    confirmed=keys;
+    force=true;
+    timer=Stopwatch.StartNew();
+   }
    foreach(var p in processes) using(p) {
     try {
      if(p.HasExited)continue;
-     if(timer.ElapsedMilliseconds<2500) p.CloseMainWindow();
-     else {p.Kill();p.WaitForExit(1500);}
+     if(!force) p.CloseMainWindow();
+     else {
+      string key=ProcessKey(p);
+      if(key!=null&&confirmed.Contains(key)) {p.Kill();p.WaitForExit(1500);}
+     }
     } catch(InvalidOperationException){} // Process exited between enumeration and access.
    }
    Thread.Sleep(250);
   }
-  var remaining=Process.GetProcessesByName(e.ProcessName);
+  var remaining=OwnProcesses(e,null);
   string ids=String.Join(", ",remaining.Select(p=>p.Id.ToString()).ToArray());
   foreach(var p in remaining)p.Dispose();
-  if(remaining.Length==0)return true;
+  if(remaining.Count==0)return true;
   throw new Exception("Programm ist nach 20 Sekunden noch aktiv (PID: "+ids+"). Bitte vollstaendig beenden und erneut versuchen.");
+ }
+ // Geplante Aufgabe beenden (EndTask): Aufgabe über die Aufgabenplanung suchen; läuft sie (State 4 = Running),
+ // Stop aufrufen und höchstens 5 Sekunden auf das Ende warten. Fehlt die Aufgabe oder scheitert etwas: Ausnahme mit Grund.
+ static void EndScheduledTask(string name) {
+  Type type=Type.GetTypeFromProgID("Schedule.Service");
+  if(type==null)throw new Exception("Die Aufgabenplanung ist nicht verfügbar – geplante Aufgabe „"+name+"“ nicht beendet.");
+  object service=null;
+  try {
+   service=Activator.CreateInstance(type);
+   ComCall(service,"Connect",Missing.Value,Missing.Value,Missing.Value,Missing.Value);
+   object folder=ComCall(service,"GetFolder","\\");
+   object task;
+   try {task=ComCall(folder,"GetTask",name.StartsWith("\\")?name:"\\"+name);}
+   catch(Exception ex) {throw new Exception("Geplante Aufgabe „"+name+"“ nicht gefunden – nichts geändert. "+ComMessage(ex));}
+   if(TaskState(task)!=4)return;
+   ComCall(task,"Stop",0);
+   var timer=Stopwatch.StartNew();
+   while(TaskState(task)==4) {
+    if(timer.ElapsedMilliseconds>5000)throw new Exception("Geplante Aufgabe „"+name+"“ läuft nach 5 Sekunden noch – nichts geändert.");
+    Thread.Sleep(200);
+   }
+  } catch(Exception ex) {
+   if(ex.Message.StartsWith("Geplante Aufgabe")||ex.Message.StartsWith("Die Aufgabenplanung"))throw;
+   throw new Exception("Geplante Aufgabe „"+name+"“ konnte nicht beendet werden – nichts geändert. "+ComMessage(ex));
+  } finally {
+   if(service!=null)try {Marshal.ReleaseComObject(service);} catch {}
+  }
+ }
+ static object ComCall(object target,string method,params object[] args) {
+  return target.GetType().InvokeMember(method,BindingFlags.InvokeMethod,null,target,args);
+ }
+ static int TaskState(object task) {
+  return Convert.ToInt32(task.GetType().InvokeMember("State",BindingFlags.GetProperty,null,task,null));
+ }
+ static string ComMessage(Exception ex) {
+  var inner=ex is TargetInvocationException&&ex.InnerException!=null?ex.InnerException:ex;
+  return inner.Message;
+ }
+ // Prozess eindeutig: Prozess-ID und Startzeit (eine wiederverwendete ID gilt nicht als derselbe Prozess). Die
+ // Startzeit kommt über GetProcessTimes mit eingeschränktem Abfragerecht (geht auch bei Programmen mit Adminrechten);
+ // ist sie nicht lesbar, null – solche Prozesse werden nie erzwungen beendet (ab 2.68).
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr process,out long creation,out long exit,out long kernel,out long user);
+ static string ProcessKey(Process p) {
+  int id;
+  try {id=p.Id;} catch {return null;}
+  IntPtr h=OpenProcess(0x1000,false,id); // PROCESS_QUERY_LIMITED_INFORMATION
+  if(h==IntPtr.Zero)return null;
+  try {
+   long creation,exit,kernel,user;
+   if(!GetProcessTimes(h,out creation,out exit,out kernel,out user)||creation==0)return null;
+   return id+":"+creation;
+  } finally {CloseHandle(h);}
+ }
+ // Rückfrage vor dem erzwungenen Beenden (ab 2.68): "einmal", "immer" (künftig ohne Rückfrage, "ForceKill") oder
+ // null (nicht beenden, vorausgewählt). Läuft im Hintergrund-Thread, die Rückfrage selbst im Fenster-Thread.
+ string AskForceKill(Entry e,List<Process> processes) {
+  var ids=new List<string>();
+  foreach(var p in processes)try {ids.Add(p.Id.ToString());} catch {}
+  string answer=null;
+  Invoke((Action)(()=>{
+   using(var dialog=new ForceKillForm(Icon,e.Name,e.ProcessName,ids)) {
+    dialog.ShowDialog(this);
+    answer=dialog.Answer;
+   }
+   if(answer=="immer")SetForceKill(e);
+   Log(e.Name+": reagiert nicht auf das normale Schließen – "+(answer==null?"nicht beendet.":answer=="immer"?"wird beendet, künftig ohne Rückfrage (\"ForceKill\").":"wird beendet (PID: "+String.Join(", ",ids.ToArray())+")."));
+  }));
+  return answer;
+ }
+ void SetForceKill(Entry e) {
+  e.ForceKill=true;
+  try {
+   var copy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
+   Store.SetPrograms(copy,allPrograms);
+   Store.SaveProfiles(copy);
+   profiles=copy;
+  } catch(Exception ex) {Log(e.Name+": Einstellung „ohne Rückfrage beenden“ konnte nicht gespeichert werden – "+ex.Message);}
+ }
+ // Prozesse eines Programms (ab 2.68): gleicher Prozessname, gleiche Windows-Sitzung und Programmdatei im Ordner der
+ // eingetragenen EXE oder darunter (Electron-Helfer liegen in Unterordnern, z.B. Discord\app-1.0\Discord.exe neben
+ // Update.exe). Der Pfad wird über QueryFullProcessImageName gelesen (geht auch bei Programmen mit Adminrechten).
+ // Ohne eingetragene EXE oder lesbaren Pfad gilt ein Prozess nicht als eigener und wird nie beendet.
+ [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(int access,bool inherit,int pid);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr process,int flags,StringBuilder name,ref int size);
+ [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+ static string ImagePath(int pid) {
+  IntPtr h=OpenProcess(0x1000,false,pid); // PROCESS_QUERY_LIMITED_INFORMATION
+  if(h==IntPtr.Zero)return null;
+  try {
+   var name=new StringBuilder(1024);
+   int size=name.Capacity;
+   return QueryFullProcessImageName(h,0,name,ref size)?name.ToString(0,size):null;
+  } finally {CloseHandle(h);}
+ }
+ static List<Process> OwnProcesses(Entry e,HashSet<string> skipped) {
+  var result=new List<Process>();
+  string folder=null;
+  try {if(!String.IsNullOrEmpty(e.Exe))folder=Path.GetDirectoryName(Path.GetFullPath(e.Exe)).TrimEnd('\\')+"\\";} catch {}
+  int session;
+  using(var self=Process.GetCurrentProcess())session=self.SessionId;
+  foreach(var p in Process.GetProcessesByName(e.ProcessName)) {
+   bool mine=false;
+   try {
+    if(folder!=null&&!p.HasExited&&p.SessionId==session) {
+     string path=ImagePath(p.Id);
+     mine=path!=null&&Path.GetFullPath(path).StartsWith(folder,StringComparison.OrdinalIgnoreCase);
+    }
+   } catch {}
+   if(mine)result.Add(p);
+   else {if(skipped!=null)skipped.Add(p.Id.ToString());p.Dispose();}
+  }
+  return result;
  }
  // Nachkorrektur beim Start und nach Wiederherstellen: alle angehakten Kanten aus "Kanten je Programm"
  // mit ihren eigenen Abständen (wie "Automatisch"); ohne angehakte Kante bleibt die gespeicherte Position.
@@ -1587,8 +1736,8 @@ public class MainForm:Form {
   }
  }
  void StartWithAlignment(Entry e,bool afterRestore) {
-  if(!System.IO.File.Exists(e.Exe))throw new FileNotFoundException("Programmdatei fehlt: "+e.Exe);
-  Process.Start(new ProcessStartInfo(e.Exe,e.Args??""){WorkingDirectory=Path.GetDirectoryName(e.Exe),UseShellExecute=true});
+  // Geprüfter Start (nur .exe, Pfad unmittelbar vorher geprüft; ab 2.68 gemeinsam mit RestoreWindow)
+  Store.StartProgram(e);
   string rule=StartupRule(e);
   int gap=SavedGap();
   if(String.IsNullOrEmpty(rule))return;
@@ -1636,7 +1785,12 @@ public class MainForm:Form {
      var profileCopy=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(profiles));
      await Task.Run(()=>{
       // Fensterprogramme (Easy2Sync, eigene) brauchen die Programmdatei nur, wenn sie gestartet werden müssen.
-      if(!entry.WindowOnly && !System.IO.File.Exists(entry.Exe))throw new FileNotFoundException("Programmdatei fehlt: "+entry.Exe);
+      if(!entry.WindowOnly) {
+       // Pfadprüfung vor jedem Zugriff auf die Programmdatei (ab 2.68)
+       string pathProblem=Store.ProgramPathProblem(entry);
+       if(pathProblem!=null)throw new Exception(pathProblem+".");
+       if(!Store.ProgramFileExists(entry))throw new FileNotFoundException("Programmdatei fehlt: "+entry.Exe);
+      }
       if(!capture && !profileCopy.ContainsKey(entry.Id))throw new Exception("Keine Position gespeichert.");
       if(entry.WindowOnly) {
        // Fenster direkt messen bzw. verschieben; das Programm wird dafür nicht beendet.
@@ -1668,6 +1822,9 @@ public class MainForm:Form {
        return;
       }
       bool running=Stop(entry);
+      // "Immer ohne Rückfrage" kann die Programmliste geändert haben: in die Kopie übernehmen (sonst überschreibt das
+      // Speichern unten die Einstellung).
+      if(capture)Store.SetPrograms(profileCopy,allPrograms);
       try {
        if(capture) profileCopy[entry.Id]=Store.Capture(entry);
        else Store.Restore(entry,(Dictionary<string,object>)profileCopy[entry.Id]);

@@ -1,6 +1,6 @@
 ﻿FENSTERPOSITIONEN
 ================
-Version 2.67 (Build-Datum wird angehängt, z.B. 2.67.2026.1122)
+Version 2.70 (Build-Datum wird angehängt, z.B. 2.70.2026.1122)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte (Programmliste und Positionen) verwendet, solange noch keine eigenen
@@ -69,7 +69,23 @@ Wiederherstellen
 Programme auswählen und "Wiederherstellen" anklicken.
 Die gewählten Programme werden beendet, ihre Positionen wiederhergestellt
 und anschließend gestartet. Vor Änderungen werden Sicherungen angelegt.
-Falls das normale Schließen nicht genügt, werden die Prozesse beendet.
+Falls das normale Schließen nicht genügt (z.B. Discord bleibt im
+Infobereich), fragt das Programm nach: "Beenden" beendet genau die genannten
+Prozesse (Prozess-ID und Startzeit), "Nicht beenden" (vorausgewählt) bricht
+für dieses Programm ab, "Immer ohne Rückfrage" merkt sich das für dieses
+Programm ("ForceKill" in Positionen.json; auch dann werden nur die Prozesse
+beendet, die beim Durchlauf erfasst wurden, und nur solche mit lesbarer
+Startzeit). Als Prozesse dieses Programms
+gelten nur solche mit gleichem Prozessnamen, in derselben Windows-Sitzung
+und mit Programmdatei im Ordner der eingetragenen EXE (oder darunter, z.B.
+Discord\app-…). Gleichnamige Prozesse aus anderen Ordnern bleiben unberührt
+(Hinweis im Protokoll); ohne eingetragene Programmdatei wird nie beendet.
+Gestartet wird nur eine .exe, deren Pfad unmittelbar vorher geprüft wird
+(nicht im Netzwerk, ohne Reparse Point – außer der Eintrag erlaubt es mit
+"AllowNetwork" –, erst dann wird nachgesehen, ob sie vorhanden ist; ein
+Netzwerkpfad wird ohne Freigabe nie abgefragt, auch nicht für die
+Programmliste); die EXE wird direkt gestartet, nur wenn
+Windows Administratorrechte verlangt (z.B. Task-Manager) über die Shell.
 Offene, noch nicht abgeschlossene Arbeiten vorher beenden.
 Danach werden die angehakten Kanten aus "Kanten je Programm" mit ihren
 Abständen ausgerichtet (wie "Automatisch"), auch bei TeamSpeak 3, Easy2Sync
@@ -128,7 +144,9 @@ Eigene Positionen und Programmliste:
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen\Positionen.json
 Sicherungen:
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen\Sicherungen
-Protokolldateien (eine Datei pro Tag, ältere als 30 Tage werden gelöscht):
+Protokolldateien (eine Datei pro Tag, ältere als 30 Tage werden gelöscht;
+eine Zeile je Eintrag, Zeilenumbrüche und Steuerzeichen etwa aus
+Fenstertiteln stehen dort als \n, \r, \t bzw. \uXXXX):
 %LOCALAPPDATA%\Fensterpositionen wiederherstellen\TraceLogs\Protokoll-JJJJ-MM-TT.txt
 "Sicherungen öffnen" (Navigation > Einstellungen) öffnet den Ordner
 Sicherungen, "Protokolle öffnen" den Ordner TraceLogs; beides geht auch im
@@ -409,10 +427,18 @@ Ein Eintrag:
   Id              eindeutiger Name, z.B. "discord" (nicht mit _ beginnend)
   Name            Anzeige in der Liste
   ProcessName     Prozess ohne .exe; AltProcessName: zweiter Prozessname
-  Exe, Args       Programmdatei (zum Starten) und Startparameter
-  File + Keys     Position steht in einer JSON-Datei des Programms (Felder)
+  Exe, Args       Programmdatei (zum Starten, nur .exe) und Startparameter
+  File + Keys     Position steht in einer JSON-Datei des Programms (Felder);
+                  nur .json unter %LOCALAPPDATA% oder %APPDATA%, nicht im
+                  Netzwerk, nicht hinter einer Verknüpfung (Reparse Point)
   RegistryPath + Keys
-                  Position steht in der Registry (HKEY_CURRENT_USER, Werte)
+                  Position steht in der Registry (HKEY_CURRENT_USER, Werte;
+                  Werteart wird mitgespeichert, unterstützt: Binär, DWord,
+                  QWord, Text, erweiterbarer Text, Textliste; der Name
+                  "_Registrytypen" ist dafür reserviert);
+                  nur unter Software\…, nicht unter Classes, Policies,
+                  Wow6432Node, Microsoft\Windows\CurrentVersion (z.B. Run),
+                  Microsoft\Windows NT\CurrentVersion und Command Processor
                   ohne File/RegistryPath: Fenster wird direkt gemessen und
                   verschoben (wie bei "Programm hinzufügen")
   DefaultEdges    Vorgabe für "Kanten je Programm": top, bottom, left,
@@ -422,7 +448,12 @@ Ein Eintrag:
   RestartService  Dienst nach Ändern/Wiederherstellen neu starten (DU Meter:
                   DUMeterSvc)
   EndTask         geplante Aufgabe vor dem Beenden stoppen (Task-Manager:
-                  "Task Manager starten")
+                  "Task Manager starten"); fehlt sie oder läuft sie nach
+                  5 Sekunden noch, wird für das Programm nichts geändert
+  AllowNetwork    true: Programmdatei darf im Netzwerk bzw. hinter einem
+                  Reparse Point liegen (sonst wird sie nicht gestartet)
+  ForceKill       true: reagiert das Programm nicht auf das normale
+                  Schließen, ohne Rückfrage beenden
   Group           Gruppe in der Programmliste (leer = ohne Gruppe)
   WindowTitle     nur das Fenster mit diesem Titel (sonst eines, das ihn
                   enthält); leer = Hauptfenster des Programms
@@ -440,15 +471,32 @@ Update-Einstellungen (z.B. als Sicherung oder für einen anderen PC).
 "Einstellungen importieren …" ersetzt alle Einstellungen durch eine solche
 Datei:
 - Die Datei wird erst vollständig gelesen und geprüft: höchstens 8 MB,
-  500 Programme und 100 Anordnungen.
-- Danach zeigt eine Vorschau alle Programme der Datei mit Programm,
-  Parametern und Positionsdatei bzw. Registry-Schlüssel. Hervorgehoben sind
-  Programme mit Netzwerkpfad (\\Server\…, //Server/…, file://…,
-  verbundene Netzlaufwerke) und Sonderfälle (Dienst neu starten, geplante
-  Aufgabe beenden). Sie werden nur übernommen, wenn der jeweilige Schalter
-  eingeschaltet ist (Standard aus): sonst fallen Programme mit Netzwerkpfad
-  weg und bei den Sonderfällen nur diese Angaben. Vorausgewählt ist
-  "Abbrechen".
+  500 Programme und 100 Anordnungen, jede Programm-Id nur einmal.
+- Danach zeigt eine Vorschau alle Programme der Datei, jeweils vollständig
+  mit Startbefehl (Programmdatei und Parameter) und Schreibziel
+  (Positionsdatei mit Feldern bzw. Registry-Schlüssel mit Wertnamen); der
+  Tooltip zeigt den ganzen Text.
+- Startbefehl und Schreibziel eines Programms gelten nur, wenn sie genau so
+  schon auf diesem PC stehen ("Wie auf diesem PC"; übernommen werden dann
+  die Angaben dieses PCs) oder das Programm in der Vorschau angehakt ist
+  (per Klick, Leertaste oder "Alle anhaken"). Der Haken gilt genau für den
+  angezeigten Eintrag mit allen seinen Angaben. Sonst
+  bleiben für ein hier bekanntes Programm (gleiche Id) die Angaben dieses
+  PCs; ein unbekanntes Programm kommt nur mit Name, Gruppe und
+  Fensterposition in die Liste (kein Start, kein Schreibziel).
+  Nicht zugelassene Schreibziele (siehe Programmliste, File/RegistryPath)
+  und Programmdateien, die keine .exe sind, werden nie übernommen.
+- Hervorgehoben sind Programme mit Netzwerkpfad (\\Server\…, //Server/…,
+  file://…, verbundene Netzlaufwerke, auch in den Parametern) oder
+  indirektem Ziel (Programm- oder Positionsdatei hinter einem Reparse Point,
+  z.B. App-Ausführungsalias, Junction, symbolischer Link) und Sonderfälle
+  (Dienst neu starten, geplante Aufgabe beenden, ohne Rückfrage beenden).
+  Sie werden nur übernommen,
+  wenn der jeweilige Schalter eingeschaltet ist (Standard aus): sonst fallen
+  diese Programme weg bzw. bei den Sonderfällen nur diese Angaben.
+  Sonderfälle gelten zudem nur für angehakte Programme. Ein angehaktes
+  Programm mit Netzwerkpfad oder indirektem Ziel bekommt "AllowNetwork".
+  Vorausgewählt ist "Abbrechen".
 - Update-Einstellungen ("Automatisch prüfen", "Automatisch aktualisieren",
   letzte Prüfung) und die Stecknadel der Navigation gehören zu diesem PC und
   werden nie aus der Datei übernommen.
@@ -662,17 +710,36 @@ Daten übertragen und keine Anmeldung gebraucht.
   höchstens 64 MB; übernommen werden nur EXE und Anleitung.txt.
 - Austausch: Ein Hilfsskript wartet, bis Fensterpositionen beendet ist, prüft
   Manifest und Prüfsumme noch einmal und tauscht EXE und Anleitung einzeln
-  über Hilfsdateien aus. Ein Journal hält fest, was schon ersetzt ist; schlägt
-  etwas fehl, wird die bisherige Version zurückgeholt und wieder gestartet.
-  Bleibt ein Update unvollständig liegen (z.B. Absturz, Stromausfall), bietet
-  "Jetzt aktualisieren" beim nächsten Start an, die vorherige Version
+  über Hilfsdateien aus. Vorher legt es ein Journal an (alle geplanten
+  Dateien, je Datei eine Sicherung mit Prüfsumme, dauerhaft auf den
+  Datenträger geschrieben); schlägt etwas fehl, wird die bisherige Version
+  zurückgeholt und wieder gestartet. Das Ergebnis steht je Update-Versuch in
+  einer eigenen Datei und danach im Protokoll.
+- Bleibt ein Update unvollständig liegen (z.B. Absturz, Stromausfall):
+  Ist laut Journal nichts verändert, räumt Fensterpositionen die Reste still
+  auf. Sonst bietet "Jetzt aktualisieren" an, die vorherige Version
   wiederherzustellen; danach kann das Update erneut installiert werden.
+  Vorher wird das ganze Journal geprüft (Aufbau, eindeutige Ziele,
+  Prüfsummen der Sicherungen). Passt etwas nicht oder bricht die
+  Wiederherstellung nach der ersten zurückgesetzten Datei ab, lautet das
+  Ergebnis "OFFEN": nichts wird weiter verändert, Fensterpositionen startet
+  nicht von selbst neu. Installieren, Wiederherstellen und Aufräumen laufen
+  über dieselbe Sperre.
 - Läuft Fensterpositionen mit Administratorrechten ("Als Administrator"
-  gestartet), wird nicht aktualisiert: Das Programm bittet, es normal zu
-  starten. Liegt der Programmordner unter "Programme" o. ä. ohne
-  Schreibrechte, fragt Windows beim Aktualisieren nach Administratorrechten;
-  das Skript arbeitet dann in einem geschützten Ordner unter %ProgramData%
-  und startet Fensterpositionen danach wieder mit normalen Rechten.
+  gestartet), wird weder aktualisiert noch eine vorherige Version
+  wiederhergestellt: Das Programm bittet, es normal zu starten. Auch die
+  Hilfsskripte prüfen ihre tatsächlichen Rechte.
+- Liegt der Programmordner unter "Programme" o. ä. ohne Schreibrechte, fragt
+  Windows beim Aktualisieren nach Administratorrechten. Das Skript arbeitet
+  dann in einem geschützten Ordner unter %ProgramData% und ändert erst etwas,
+  wenn der unsichtbare Neustarthelfer bereit ist und den Empfang bestätigt
+  hat; Fensterpositionen startet danach wieder mit normalen Rechten.
+- Wiederherstellung mit Administratorrechten: Arbeitsordner, Journal, Ordner
+  Alt und jede Sicherung müssen geschützt sein (kein Reparse Point, Besitzer
+  Administratoren bzw. SYSTEM, keine Schreib-, Lösch- oder
+  Rechteänderungsrechte für andere Konten). Sonst wird nichts zurückgespielt
+  und auch nichts in den Arbeitsordner geschrieben; das Protokoll meldet dann
+  "Ergebnis unbekannt".
 - Im Projektordner (mit Erstellen.bat) wird nie ersetzt, weil dort die EXE
   beim Erstellen entsteht; "Jetzt aktualisieren" öffnet dann die Release-Seite.
 - Download, Hilfsskript und Update.log liegen im Temp-Ordner unter
@@ -697,6 +764,8 @@ Erstellen und Backup
 --------------------
 Erstellen.bat per Doppelklick ausführen (ersetzt das frühere Erstellen.ps1).
 Das Programm muss dabei beendet sein; sonst wartet das Skript darauf.
+Erstellen.bat bricht ab, wenn sie aus einer Sicherung (Ordner Backup)
+gestartet wird – bitte immer die im Projektordner starten.
 Ablauf:
 1. Nebenversion um 1 erhöhen, Versionsnummer bilden und VersionInfo.cs schreiben.
 2. Kompilieren in "Fensterpositionen wiederherstellen.neu.exe".
@@ -708,8 +777,8 @@ Ablauf:
 6. Auf Nachfrage (Standard Nein nach 10 Sekunden, bei /nopause nie) wird das
    Release-Paket erstellt und signiert: im Ordner Release das ZIP
    "Fensterpositionen-wiederherstellen-<Version>.zip" und das Manifest
-   dazu (ein älteres Paket wird ersetzt). Schlägt das fehl, wird das Paket gelöscht und Erstellen.bat
-   meldet den Fehler rot.
+   dazu (ein älteres Paket wird ersetzt). Schlägt das fehl, wird das Paket
+   gelöscht und Erstellen.bat meldet den Fehler rot.
 7. Das gesamte Projekt (EXE, Quellcode, Icons, Anleitung, Screenshots usw.)
    wird nach "Backup\Fensterpositionen wiederherstellen v<Version>" kopiert,
    z.B. "Backup\Fensterpositionen wiederherstellen v2.2.2026.1029".
@@ -720,6 +789,45 @@ auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
 
+2.70           Sicherheit (2.68 und 2.69 waren nur interne Builds):
+               - Einstellungen importieren: Startbefehl und Schreibziel nur
+                 "wie auf diesem PC" (dann mit den Angaben dieses PCs) oder je
+                 Eintrag angehakt (Haken gilt genau für diesen Datensatz),
+                 vollständige Anzeige in der Vorschau, doppelte Programm-Ids
+                 abgelehnt, Feldlisten einzeln verglichen.
+               - Zugelassene Schreibziele (Datei nur .json unter AppData,
+                 Registry nur HKCU\Software ohne Run/Policies/Classes u.a.),
+                 vor jedem Lesen und Schreiben geprüft; Registry alles oder
+                 nichts (bei einem Fehler vorherige Werte zurück), Werteart und
+                 Rohwert bleiben erhalten (ExpandString nicht expandiert,
+                 MultiString als Liste, andere Arten abgelehnt).
+               - Geplante Aufgabe (EndTask) über die Aufgabenplanung beenden;
+                 scheitert das, wird für dieses Programm nichts geändert.
+               - Laufwerk unbekannter Art gilt wie ein Netzwerkpfad; der
+                 Neustarthelfer erkennt eine wiederverwendete Prozess-ID des
+                 Updates an der Startzeit.
+               - Gemeinsamer geprüfter Programmstart: nur .exe, Netzwerk und
+                 Reparse Points vor jedem Zugriff geprüft (nur mit
+                 "AllowNetwork"), EXE direkt ohne Shell.
+               - Beenden nur der Prozesse dieses Programms (Ordner der EXE,
+                 gleiche Sitzung), erzwungen nur nach Rückfrage oder mit
+                 "ForceKill" und nur die erfassten Prozesse (PID und
+                 Startzeit).
+               - Sicherungsdateien mit bereinigtem Namen; Protokoll maskiert
+                 Zeilenumbrüche und Steuerzeichen; Systemprogramme (Explorer,
+                 schtasks) über feste Pfade.
+               - Update auf dem Stand der Globalen Richtlinien vom 22.11.2026
+                 (wie Wake on LAN 1.73): Journalformat 2 mit Plan und
+                 Prüfsummen, dauerhaft geschrieben, volle Prüfung vor jeder
+                 Wiederherstellung, gemeinsame Sperre, stilles Aufräumen nur
+                 ohne Änderungen, Reparatur über geprüften Lader, Ergebnis je
+                 Versuch, Ablauf mit Rechteerhöhung über Neustarthelfer mit
+                 Bereitmeldung und Empfangsbestätigung; keine Wiederherstellung
+                 aus einer Instanz mit Adminrechten, Skripte prüfen ihre
+                 tatsächlichen Rechte, erhöhte Wiederherstellung nur aus
+                 geschützten Dateien.
+               - Erstellen.bat bricht ab, wenn sie aus einer Sicherung
+                 gestartet wird.
 2.67           Updates nach den Globalen Richtlinien: nur signierte Updates
                (Manifest mit Haupt-/Reserveschlüssel, SHA-256, genauer
                Dateiname und Download-Adresse, Größengrenze), Austausch mit

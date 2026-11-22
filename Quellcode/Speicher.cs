@@ -37,11 +37,16 @@ public class Entry {
  // Fenstertitel (ab 2.52): nur das Fenster mit diesem Titel (sonst eines, das ihn enthält) gehört zum Eintrag,
  // z.B. "Steam" und "Freunde" bei steamwebhelper. Leer = Hauptfenster des Programms.
  public string WindowTitle;
+ // Ab 2.68: AllowNetwork = Programmdatei darf im Netzwerk bzw. hinter einem Reparse Point liegen (sonst startet
+ // StartProgram sie nicht); ForceKill = reagiert das Programm nicht auf das normale Schließen, ohne Rückfrage beenden.
+ public bool AllowNetwork,ForceKill;
 }
 // Ein Programm in der Vorschau beim Import (ab 2.67).
 public class ImportItem {
- public string Name,Group,Target,Special;
- public bool Network;
+ public string Id,Key,Name,Group,Start,Target,Special,Blocked;
+ // Network: Netzwerkpfad oder indirektes Ziel; Known: Startbefehl/Schreibziel wie auf diesem PC (oder keins);
+ // Local: Programm mit dieser Id gibt es hier schon; Approved: in der Vorschau freigegeben.
+ public bool Network,Indirect,Known,Local,Approved;
 }
 public static class Store {
  // Einstellungsordner: %LOCALAPPDATA%\Fensterpositionen wiederherstellen (Positionen.json, Sicherungen, TraceLogs).
@@ -168,7 +173,7 @@ public static class Store {
   string name=Field(d,"Name"),file=Field(d,"File"),registry=Field(d,"RegistryPath");
   var e=new Entry{Id=id,Name=String.IsNullOrEmpty(name)?process:name,ProcessName=process,AltProcessName=Empty(Field(d,"AltProcessName")),
    Exe=ExpandPath(Field(d,"Exe")),Args=Empty(Field(d,"Args")),Keys=Strings(d,"Keys"),DefaultEdges=Strings(d,"DefaultEdges")??new string[0],
-   CenterOthers=Flag(d,"CenterOthers"),RestartService=Empty(Field(d,"RestartService")),EndTask=Empty(Field(d,"EndTask")),Group=Empty((Field(d,"Group")??"").Trim()),WindowTitle=Empty(Field(d,"WindowTitle"))};
+   CenterOthers=Flag(d,"CenterOthers"),RestartService=Empty(Field(d,"RestartService")),EndTask=Empty(Field(d,"EndTask")),Group=Empty((Field(d,"Group")??"").Trim()),WindowTitle=Empty(Field(d,"WindowTitle")),AllowNetwork=Flag(d,"AllowNetwork"),ForceKill=Flag(d,"ForceKill")};
   if(!String.IsNullOrEmpty(file))e.File=ExpandPath(file);
   else if(!String.IsNullOrEmpty(registry)){e.Registry=true;e.RegistryPath=registry;}
   else {e.WindowOnly=true;e.Keys=new[]{"Window"};}
@@ -191,6 +196,8 @@ public static class Store {
   if(e.CenterOthers)d["CenterOthers"]=true;
   if(!String.IsNullOrEmpty(e.RestartService))d["RestartService"]=e.RestartService;
   if(!String.IsNullOrEmpty(e.EndTask))d["EndTask"]=e.EndTask;
+  if(e.AllowNetwork)d["AllowNetwork"]=true;
+  if(e.ForceKill)d["ForceKill"]=true;
   return d;
  }
  public static List<object> ProgramRecords(IEnumerable<Entry> entries) {
@@ -277,6 +284,14 @@ public static class Store {
   foreach(string key in new[]{ProgramsKey,CustomKey}) {
    var items=data.ContainsKey(key)?data[key] as System.Collections.ICollection:null;
    if(items!=null&&items.Count>ImportMaxPrograms)throw new Exception("Die Datei enthält zu viele Programme ("+items.Count+", höchstens "+ImportMaxPrograms+").");
+   // Jede Programm-Id nur einmal (ab 2.68): Vorschau und Freigabe gelten sonst womöglich für einen anderen Datensatz.
+   var ids=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+   if(items!=null&&!(data[key] is string))
+    foreach(object item in items) {
+     var record=item as Dictionary<string,object>;
+     string id=record!=null?Field(record,"Id"):null;
+     if(!String.IsNullOrEmpty(id)&&!ids.Add(id))throw new Exception("Die Datei enthält die Programm-Id „"+id+"“ mehrfach.");
+    }
   }
   if(data.ContainsKey(ArrangementsKey)&&!(data[ArrangementsKey] is Dictionary<string,object>))throw new Exception("Die Anordnungen in der Datei sind ungültig.");
   int arrangements=Arrangements(data).Count;
@@ -285,43 +300,227 @@ public static class Store {
  }
  // Liste der Programme, die die Datei mitbringt (ab 2.52 "_programme", bis 2.51 "_custom").
  static string ImportListKey(Dictionary<string,object> data){return data.ContainsKey(ProgramsKey)?ProgramsKey:CustomKey;}
- public static List<ImportItem> AnalyzeImport(Dictionary<string,object> data) {
-  var result=new List<ImportItem>();
-  foreach(var e in ProgramsFrom(data,ImportListKey(data))) {
-   string target=CompactPath(e.Exe)??"";
-   if(!String.IsNullOrEmpty(e.Args))target+=(target.Length>0?" ":"")+e.Args;
-   if(e.File!=null)target+=(target.Length>0?" · ":"")+"Datei "+CompactPath(e.File);
-   else if(e.Registry)target+=(target.Length>0?" · ":"")+"Registry HKCU\\"+e.RegistryPath;
-   var specials=new List<string>();
-   if(e.RestartService!=null)specials.Add("Dienst „"+e.RestartService+"“ neu starten");
-   if(e.EndTask!=null)specials.Add("geplante Aufgabe „"+e.EndTask+"“ beenden");
-   result.Add(new ImportItem{Name=e.Name,Group=e.Group,Target=target.Length>0?target:e.ProcessName+".exe",Network=UsesNetwork(e),Special=specials.Count>0?String.Join(", ",specials):null});
+ // Startbefehle und Schreibziele (ab 2.68): Ein importierter Eintrag bringt Programmdatei, Parameter, Positionsdatei
+ // bzw. Registry-Schlüssel mit. Übernommen werden sie nur, wenn sie genau so schon auf diesem PC stehen ("wie auf
+ // diesem PC") oder in der Vorschau für den Eintrag freigegeben sind. Sonst gelten für ein hier bekanntes Programm
+ // (gleiche Id) die Angaben von diesem PC, für ein unbekanntes nur die Fensterposition (kein Start, kein Schreibziel).
+ static readonly string[] ActionKeys={"ProcessName","AltProcessName","Exe","Args","File","RegistryPath","Keys","RestartService","EndTask","AllowNetwork","ForceKill"};
+ static Dictionary<string,Dictionary<string,object>> LocalRecords() {
+  var result=new Dictionary<string,Dictionary<string,object>>(StringComparer.OrdinalIgnoreCase);
+  Dictionary<string,object> raw;
+  try {raw=LoadRaw();} catch {return result;}
+  var items=raw!=null&&raw.ContainsKey(ProgramsKey)?raw[ProgramsKey] as System.Collections.IEnumerable:null;
+  if(items!=null&&!(raw[ProgramsKey] is string))
+   foreach(object item in items) {
+    var record=item as Dictionary<string,object>;
+    var e=ProgramFromRecord(record);
+    if(e!=null&&!result.ContainsKey(e.Id))result[e.Id]=record;
+   }
+  return result;
+ }
+ static bool SameKeys(string[] a,string[] b){return (a??new string[0]).SequenceEqual(b??new string[0],StringComparer.Ordinal);}
+ static bool SameActions(Entry a,Entry b) {
+  Func<string,string,bool> same=(x,y)=>String.Equals(x??"",y??"",StringComparison.OrdinalIgnoreCase);
+  return same(a.ProcessName,b.ProcessName)&&same(a.AltProcessName,b.AltProcessName)&&same(CompactPath(a.Exe),CompactPath(b.Exe))&&
+   String.Equals(a.Args??"",b.Args??"",StringComparison.Ordinal)&&same(CompactPath(a.File),CompactPath(b.File))&&same(a.RegistryPath,b.RegistryPath)&&
+   a.WindowOnly==b.WindowOnly&&SameKeys(a.Keys,b.Keys)&&same(a.RestartService,b.RestartService)&&same(a.EndTask,b.EndTask)&&
+   a.AllowNetwork==b.AllowNetwork&&a.ForceKill==b.ForceKill;
+ }
+ static bool HasActions(Entry e){return !String.IsNullOrEmpty(e.Exe)||!e.WindowOnly||e.RestartService!=null||e.EndTask!=null||e.AllowNetwork||e.ForceKill;}
+ // Gültige Programmeinträge der Datei in Dateireihenfolge – dieselbe Liste für Vorschau und Übernahme.
+ static List<KeyValuePair<Dictionary<string,object>,Entry>> ImportRecords(Dictionary<string,object> data,string key) {
+  var result=new List<KeyValuePair<Dictionary<string,object>,Entry>>();
+  var items=data.ContainsKey(key)?data[key] as System.Collections.IEnumerable:null;
+  if(items==null||data[key] is string)return result;
+  var ids=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  foreach(object item in items) {
+   var record=item as Dictionary<string,object>;
+   var e=ProgramFromRecord(record);
+   if(e!=null&&ids.Add(e.Id))result.Add(new KeyValuePair<Dictionary<string,object>,Entry>(record,e));
   }
   return result;
  }
- // Endgültige Einstellungen aus der Datei: Netzwerk-Programme bzw. Sonderfälle nur mit Zustimmung, lokale Werte
- // (LocalKeys) aus der bisherigen Positionen.json. Ungültige Programmeinträge fallen weg.
- public static Dictionary<string,object> PrepareImport(Dictionary<string,object> data,bool network,bool special) {
+ // Freigabe gilt für genau diesen Datensatz: Id und alle Aktionsfelder, wie sie in der Datei stehen.
+ static string ApprovalKey(Dictionary<string,object> record) {
+  var values=new List<object>();
+  foreach(string k in ActionKeys)values.Add(record.ContainsKey(k)?record[k]:null);
+  return Field(record,"Id")+"\n"+Json().Serialize(values);
+ }
+ static List<string> Specials(Entry e) {
+  var specials=new List<string>();
+  if(e.RestartService!=null)specials.Add("Dienst „"+e.RestartService+"“ neu starten");
+  if(e.EndTask!=null)specials.Add("geplante Aufgabe „"+e.EndTask+"“ beenden");
+  if(e.ForceKill)specials.Add("ohne Rückfrage beenden");
+  return specials;
+ }
+ public static List<ImportItem> AnalyzeImport(Dictionary<string,object> data) {
+  var result=new List<ImportItem>();
+  var local=LocalRecords();
+  foreach(var pair in ImportRecords(data,ImportListKey(data))) {
+   var e=pair.Value;
+   var item=new ImportItem{Id=e.Id,Key=ApprovalKey(pair.Key),Name=e.Name,Group=e.Group};
+   item.Start=String.IsNullOrEmpty(e.Exe)?"":CompactPath(e.Exe)+(String.IsNullOrEmpty(e.Args)?"":" "+e.Args);
+   item.Target=e.WindowOnly?"":e.Registry?"Registry HKCU\\"+e.RegistryPath+" – Werte: "+String.Join(", ",e.Keys):"Datei "+CompactPath(e.File)+" – Felder: "+String.Join(", ",e.Keys);
+   var specials=Specials(e);
+   item.Special=specials.Count>0?String.Join(", ",specials):null;
+   item.Indirect=IndirectProgram(e);
+   item.Network=UsesNetwork(e)||item.Indirect;
+   Dictionary<string,object> mine;
+   item.Local=local.TryGetValue(e.Id,out mine);
+   item.Known=!HasActions(e)||(item.Local&&SameActions(ProgramFromRecord(mine),e));
+   item.Blocked=WriteTargetProblem(e)??ProgramFileProblem(e);
+   result.Add(item);
+  }
+  return result;
+ }
+ // Endgültige Einstellungen aus der Datei: Netzwerk-Programme bzw. Sonderfälle nur mit Zustimmung, Startbefehle und
+ // Schreibziele nur "wie auf diesem PC" (dann mit den Feldern von diesem PC) oder für genau diesen Datensatz
+ // freigegeben (approved = ImportItem.Key), lokale Werte (LocalKeys) aus der bisherigen Positionen.json.
+ // Ungültige Programmeinträge fallen weg.
+ public static Dictionary<string,object> PrepareImport(Dictionary<string,object> data,bool network,bool special,ICollection<string> approved) {
   var copy=Json().Deserialize<Dictionary<string,object>>(Json().Serialize(data));
+  var local=LocalRecords();
   foreach(string key in new[]{ProgramsKey,CustomKey}) {
    if(!copy.ContainsKey(key))continue;
-   var items=copy[key] as System.Collections.IEnumerable;
    var kept=new List<object>();
-   if(items!=null&&!(copy[key] is string))
-    foreach(object item in items) {
-     var record=item as Dictionary<string,object>;
-     var e=ProgramFromRecord(record);
-     if(e==null)continue;
-     if(!network&&UsesNetwork(e))continue;
-     if(!special){record.Remove("RestartService");record.Remove("EndTask");}
-     kept.Add(record);
+   foreach(var pair in ImportRecords(copy,key)) {
+    var record=pair.Key;
+    var e=pair.Value;
+    bool net=UsesNetwork(e)||IndirectProgram(e);
+    if(!network&&net)continue;
+    Dictionary<string,object> mine;
+    bool isLocal=local.TryGetValue(e.Id,out mine);
+    bool known=!HasActions(e)||(isLocal&&SameActions(ProgramFromRecord(mine),e));
+    bool allowed=WriteTargetProblem(e)==null&&ProgramFileProblem(e)==null;
+    bool freed=allowed&&!known&&approved!=null&&approved.Contains(ApprovalKey(record));
+    if(freed) {
+     if(!special)foreach(string k in new[]{"RestartService","EndTask","ForceKill"})record.Remove(k);
+     // Netzwerk/indirektes Ziel nur mit Schalter und Freigabe startbar
+     if(net)record["AllowNetwork"]=true;else record.Remove("AllowNetwork");
+    } else if(isLocal) {
+     // bekannt oder nicht freigegeben, Programm gibt es hier: Aktionsfelder von diesem PC
+     foreach(string k in ActionKeys){if(mine.ContainsKey(k))record[k]=mine[k];else record.Remove(k);}
+    } else {
+     // unbekanntes Programm ohne Freigabe: nur Name, Gruppe und Fensterposition (kein Start, kein Schreibziel)
+     foreach(string k in ActionKeys)if(k!="ProcessName")record.Remove(k);
     }
+    kept.Add(record);
+   }
    copy[key]=kept;
   }
   foreach(string key in LocalKeys)copy.Remove(key);
   var current=System.IO.File.Exists(Profiles)?Read(Profiles):null;
   if(current!=null)foreach(string key in LocalKeys)if(current.ContainsKey(key))copy[key]=current[key];
   return copy;
+ }
+ // Zugelassene Schreibziele (ab 2.68), geprüft beim Import und vor jedem Schreiben:
+ // - Positionsdatei: .json unter %LOCALAPPDATA% oder %APPDATA%, nicht im Netzwerk, nicht im eigenen Einstellungsordner,
+ //   ohne Reparse Point (Verknüpfung, Junction, symbolischer Link) im Pfad.
+ // - Registry: HKCU\Software\…, nicht unter Classes, Policies, Wow6432Node, Windows\CurrentVersion (z.B. Run),
+ //   Windows NT\CurrentVersion (z.B. Winlogon) und Command Processor (AutoRun).
+ static readonly string[] BlockedRegistry={@"Software\Classes",@"Software\Policies",@"Software\Wow6432Node",@"Software\Microsoft\Windows\CurrentVersion",
+  @"Software\Microsoft\Windows NT\CurrentVersion",@"Software\Microsoft\Command Processor"};
+ public static string WriteTargetProblem(Entry e) {
+  if(e.WindowOnly)return null;
+  if(e.Registry) {
+   // "_Registrytypen" ist im Profil für die Wertearten reserviert und darf kein Registry-Wert in Keys sein
+   if(e.Keys!=null&&e.Keys.Any(k=>String.Equals(k,RegistryTypesKey,StringComparison.OrdinalIgnoreCase)))
+    return "Registry-Wert „"+RegistryTypesKey+"“ ist reserviert";
+   string key=e.RegistryPath??"";
+   if(key.StartsWith("\\")||key.EndsWith("\\")||key.Contains("\\\\")||!key.StartsWith(@"Software\",StringComparison.OrdinalIgnoreCase)||key.Split('\\').Any(x=>x.Trim()=="."||x.Trim()==".."))
+    return "Registry-Schlüssel außerhalb von HKCU\\Software";
+   foreach(string blocked in BlockedRegistry)
+    if(key.Equals(blocked,StringComparison.OrdinalIgnoreCase)||key.StartsWith(blocked+"\\",StringComparison.OrdinalIgnoreCase))return "Registry-Schlüssel HKCU\\"+blocked+" ist nicht zugelassen";
+   return null;
+  }
+  string path;
+  try {path=Path.GetFullPath(e.File);} catch {return "Ungültiger Pfad der Positionsdatei";}
+  if(IsNetworkPath(path))return "Positionsdatei im Netzwerk";
+  if(!path.EndsWith(".json",StringComparison.OrdinalIgnoreCase))return "Positionsdatei ist keine .json-Datei";
+  string root=null;
+  foreach(var folder in new[]{Environment.SpecialFolder.LocalApplicationData,Environment.SpecialFolder.ApplicationData}) {
+   string r=Environment.GetFolderPath(folder).TrimEnd('\\');
+   if(r.Length>0&&path.StartsWith(r+"\\",StringComparison.OrdinalIgnoreCase))root=r;
+  }
+  if(root==null)return "Positionsdatei außerhalb von %LOCALAPPDATA% bzw. %APPDATA%";
+  if(path.StartsWith(Root.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase))return "Positionsdatei im Einstellungsordner von "+AppInfo.Product;
+  if(HasReparsePoint(path,root))return "Positionsdatei hinter einer Verknüpfung (Reparse Point)";
+  return null;
+ }
+ // Programm starten (ab 2.68, gemeinsam für Wiederherstellen und Fensterprogramme): Pfad unmittelbar vorher auflösen
+ // und prüfen – nur .exe, vorhanden, nicht im Netzwerk und ohne Reparse Point im Pfad (außer der Eintrag erlaubt es,
+ // "AllowNetwork", z.B. nach Freigabe beim Import). Gestartet wird die EXE direkt (ohne Shell); nur wenn Windows dafür
+ // Administratorrechte verlangt (z.B. Task-Manager), über die Shell mit demselben geprüften .exe-Pfad.
+ public static void StartProgram(Entry e) {
+  string problem=ProgramPathProblem(e);
+  if(problem!=null)throw new Exception(problem+" – nicht gestartet."+(problem.StartsWith("Programmdatei liegt")?" Freigabe im Eintrag: \"AllowNetwork\": true.":""));
+  string exe=Path.GetFullPath(e.Exe);
+  if(!System.IO.File.Exists(exe))throw new FileNotFoundException("Programmdatei fehlt: "+e.Exe);
+  var info=new ProcessStartInfo(exe,e.Args??""){WorkingDirectory=Path.GetDirectoryName(exe),UseShellExecute=false};
+  try {using(Process.Start(info)){}}
+  catch(System.ComponentModel.Win32Exception ex) {
+   if(ex.NativeErrorCode!=740)throw; // ERROR_ELEVATION_REQUIRED
+   info.UseShellExecute=true;
+   using(Process.Start(info)){}
+  }
+ }
+ // Pfadprüfung der Programmdatei (ab 2.68) vor jedem Dateisystemzugriff auf sie: zuerst ohne Zugriff (Text und
+ // Laufwerkstyp) Netzwerkpfade erkennen, erst danach lokal nach Reparse Points suchen (von der Wurzel abwärts, an
+ // einem Reparse Point wird nicht weiter abgefragt). Mit "AllowNetwork" entfallen Netzwerk- und Reparse-Prüfung.
+ public static string ProgramPathProblem(Entry e) {
+  if(String.IsNullOrEmpty(e.Exe))return "Keine Programmdatei eingetragen";
+  string exe;
+  try {exe=Path.GetFullPath(e.Exe);} catch {return "Ungültiger Pfad der Programmdatei";}
+  if(!exe.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))return "Programmdatei ist keine .exe-Datei";
+  if(e.AllowNetwork)return null;
+  if(IsNetworkPath(exe))return "Programmdatei liegt im Netzwerk oder auf einem Laufwerk unbekannter Art";
+  if(HasReparsePoint(exe,Path.GetPathRoot(exe)))return "Programmdatei liegt hinter einer Verknüpfung (Reparse Point)";
+  return null;
+ }
+ // Programmdatei vorhanden? Abgefragt wird nur nach bestandener Pfadprüfung, sonst false ohne Zugriff.
+ public static bool ProgramFileExists(Entry e) {
+  return ProgramPathProblem(e)==null&&System.IO.File.Exists(Path.GetFullPath(e.Exe));
+ }
+ // Systemprogramme nur über feste Pfade, nie über den Suchpfad (Globale Richtlinien, ab 2.68).
+ public static string ExplorerExe{get{return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"explorer.exe");}}
+ public static string SystemExe(string name){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),name);}
+ // Programmdatei: nur .exe (keine Verknüpfung, kein Skript), sonst würde der Start etwas anderes ausführen.
+ public static string ProgramFileProblem(Entry e) {
+  if(String.IsNullOrEmpty(e.Exe))return null;
+  return e.Exe.TrimEnd().EndsWith(".exe",StringComparison.OrdinalIgnoreCase)?null:"Programmdatei ist keine .exe-Datei";
+ }
+ // Indirektes Ziel: Programmdatei oder Positionsdatei hinter einem Reparse Point (z.B. App-Ausführungsalias,
+ // Junction, symbolischer Link). Wohin Windows dann tatsächlich geht, lässt sich vorab nicht sicher sagen; solche
+ // Einträge gelten wie Netzwerkpfade und brauchen denselben Schalter.
+ public static bool IndirectProgram(Entry e) {
+  foreach(string file in new[]{e.Exe,e.File}) {
+   if(String.IsNullOrEmpty(file))continue;
+   try {
+    string path=Path.GetFullPath(Environment.ExpandEnvironmentVariables(file));
+    if(IsNetworkPath(path))continue; // Netzwerkpfade nie abfragen (zählen ohnehin als Netzwerk)
+    if(HasReparsePoint(path,Path.GetPathRoot(path)))return true;
+   } catch {return true;}
+  }
+  return false;
+ }
+ // Reparse Point im Pfad unterhalb von root: von oben nach unten, nur vorhandene Teile; an einem Reparse Point wird
+ // nicht weiter abgefragt (sonst würde Windows ihm folgen, z.B. zu einem Server). Fehler gelten als Reparse Point.
+ public static bool HasReparsePoint(string path,string root) {
+  try {
+   string full=Path.GetFullPath(path);
+   string stop=(root??"").TrimEnd('\\');
+   var parts=new List<string>();
+   for(string current=full;!String.IsNullOrEmpty(current)&&current.TrimEnd('\\').Length>stop.Length;current=Path.GetDirectoryName(current))parts.Add(current);
+   parts.Reverse();
+   foreach(string part in parts) {
+    FileAttributes attributes;
+    try {attributes=System.IO.File.GetAttributes(part);}
+    catch(FileNotFoundException) {return false;}
+    catch(DirectoryNotFoundException) {return false;}
+    if((attributes&FileAttributes.ReparsePoint)!=0)return true;
+   }
+  } catch {return true;}
+  return false;
  }
  // Netzwerkpfade (Globale Richtlinien, Sicherung wiederherstellen): nach ExpandEnvironmentVariables \\Server\…,
  // \\?\UNC\…, //Server/…, file://Server/… und verbundene Netzlaufwerke (DriveType Network, ohne den Server anzusprechen).
@@ -339,8 +538,12 @@ public static class Store {
   }
   if(p.StartsWith(@"\\",StringComparison.Ordinal))return true;
   if(p.Length>=2&&Char.IsLetter(p[0])&&p[1]==':') {
-   try {return new DriveInfo(p.Substring(0,1)).DriveType==DriveType.Network;}
-   catch {return false;}
+   // Laufwerkstyp unbekannt (Abfrage scheitert, Typ Unknown/NoRootDirectory): wie Netzwerk behandeln – ohne
+   // Freigabe wird dann nicht auf den Pfad zugegriffen (ab 2.68).
+   try {
+    var type=new DriveInfo(p.Substring(0,1)).DriveType;
+    return type==DriveType.Network||type==DriveType.Unknown||type==DriveType.NoRootDirectory;
+   } catch {return true;}
   }
   return false;
  }
@@ -503,25 +706,53 @@ public static class Store {
   if(!System.IO.File.Exists(start))return new Dictionary<string,object>();
   return Read(start);
  }
+ // Sicherungsdateien (ab 2.68): Der Dateiname wird intern gebildet; die Programm-Id (aus Positionen.json, auch
+ // importiert) geht nur als bereinigter Namensteil ein, und das Ziel muss im neuen Sicherungsordner liegen.
  public static string BackupFile(string path,string id) {
   string dir=Path.Combine(Root,"Sicherungen",DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+"-"+Guid.NewGuid().ToString("N").Substring(0,6));
   Directory.CreateDirectory(dir);
-  string dest=Path.Combine(dir,id+"-"+Path.GetFileName(path));
+  string dest=InFolder(dir,SafeName(id)+"-"+SafeName(Path.GetFileName(path)));
   System.IO.File.Copy(path,dest);
   return dest;
  }
+ // Nur Buchstaben, Ziffern, '-', '_' und '.' (keine Pfadtrenner, kein "..", höchstens 80 Zeichen).
+ public static string SafeName(string name) {
+  var sb=new StringBuilder();
+  foreach(char c in name??"")sb.Append(Char.IsLetterOrDigit(c)||c=='-'||c=='_'||c=='.'?c:'-');
+  string result=sb.ToString();
+  while(result.Contains(".."))result=result.Replace("..",".");
+  result=result.Trim('.',' ');
+  if(result.Length>80)result=result.Substring(0,80);
+  return result.Length==0?"programm":result;
+ }
+ static string InFolder(string dir,string name) {
+  string folder=Path.GetFullPath(dir).TrimEnd('\\')+"\\";
+  string full=Path.GetFullPath(Path.Combine(folder,name));
+  if(!full.StartsWith(folder,StringComparison.OrdinalIgnoreCase)||full.IndexOf('\\',folder.Length)>=0)throw new Exception("Ungültiger Name der Sicherungsdatei.");
+  return full;
+ }
  public static Dictionary<string,object> Capture(Entry e) {
   var result=new Dictionary<string,object>();
+  // Positionsdatei bzw. Registry-Schlüssel nur lesen, wenn er ein zugelassenes Ziel ist (Datei: kein Netzwerk, kein
+  // Reparse Point; Registry: HKCU\Software ohne gesperrte Bereiche; ab 2.68). Gelesen werden nur die Werte aus Keys.
+  if(!e.WindowOnly) {
+   string problem=WriteTargetProblem(e);
+   if(problem!=null)throw new Exception(problem+" – nicht gelesen.");
+  }
   if(e.Registry) {
+   // Werteart und Rohwert (ab 2.68): ohne Expansion gelesen, Werteart je Wert in "_Registrytypen"
+   var types=new Dictionary<string,object>();
    using(var key=Registry.CurrentUser.OpenSubKey(e.RegistryPath)) {
     if(key==null) throw new Exception("Registry-Schluessel fehlt.");
     foreach(string name in e.Keys) {
-     object value=key.GetValue(name,null);
+     object value=key.GetValue(name,null,RegistryValueOptions.DoNotExpandEnvironmentNames);
      if(value==null) throw new Exception("Registry-Wert fehlt: "+name);
-     if(key.GetValueKind(name)==RegistryValueKind.Binary) result[name]=Convert.ToBase64String((byte[])value);
-     else result[name]=value.ToString();
+     var kind=key.GetValueKind(name);
+     result[name]=RegistryToJson(name,value,kind);
+     types[name]=kind.ToString();
     }
    }
+   result[RegistryTypesKey]=types;
   } else {
    var data=Read(e.File);
    foreach(string key in e.Keys) {
@@ -531,22 +762,99 @@ public static class Store {
   }
   return result;
  }
+ // Registry-Werte in Positionen.json (ab 2.68): Binär als Base64, DWord/QWord als Text (invariant), String und
+ // ExpandString als Rohtext (nicht expandiert), MultiString als Liste; Werteart je Wert unter "_Registrytypen".
+ public const string RegistryTypesKey="_Registrytypen";
+ static bool SupportedKind(RegistryValueKind kind) {
+  return kind==RegistryValueKind.Binary||kind==RegistryValueKind.DWord||kind==RegistryValueKind.QWord||
+   kind==RegistryValueKind.String||kind==RegistryValueKind.ExpandString||kind==RegistryValueKind.MultiString;
+ }
+ static object RegistryToJson(string name,object value,RegistryValueKind kind) {
+  var inv=System.Globalization.CultureInfo.InvariantCulture;
+  switch(kind) {
+   case RegistryValueKind.Binary: return Convert.ToBase64String((byte[])value);
+   case RegistryValueKind.DWord: return Convert.ToString((int)value,inv);
+   case RegistryValueKind.QWord: return Convert.ToString((long)value,inv);
+   case RegistryValueKind.String:
+   case RegistryValueKind.ExpandString: return (string)value;
+   case RegistryValueKind.MultiString: return new List<object>((string[])value);
+   default: throw new Exception("Registry-Wert „"+name+"“ hat eine nicht unterstützte Werteart ("+kind+").");
+  }
+ }
+ static object RegistryFromJson(object stored,RegistryValueKind kind) {
+  var inv=System.Globalization.CultureInfo.InvariantCulture;
+  if(kind==RegistryValueKind.MultiString) {
+   var list=stored as System.Collections.IEnumerable;
+   if(list==null||stored is string)throw new Exception("Liste erwartet.");
+   var result=new List<string>();
+   foreach(object item in list) {
+    if(!(item is string))throw new Exception("Liste mit Text erwartet.");
+    result.Add((string)item);
+   }
+   return result.ToArray();
+  }
+  if(stored is string) {
+   string text=(string)stored;
+   switch(kind) {
+    case RegistryValueKind.Binary: return Convert.FromBase64String(text);
+    case RegistryValueKind.DWord: return Int32.Parse(text,System.Globalization.NumberStyles.Integer,inv);
+    case RegistryValueKind.QWord: return Int64.Parse(text,System.Globalization.NumberStyles.Integer,inv);
+    case RegistryValueKind.String:
+    case RegistryValueKind.ExpandString: return text;
+   }
+  } else if((stored is int||stored is long)&&(kind==RegistryValueKind.DWord||kind==RegistryValueKind.QWord)) {
+   if(kind==RegistryValueKind.DWord)return checked((int)Convert.ToInt64(stored,inv));
+   return Convert.ToInt64(stored,inv);
+  }
+  throw new Exception("Wert passt nicht zur Werteart "+kind+".");
+ }
  public static void Restore(Entry e,Dictionary<string,object> positions) {
   foreach(string k in e.Keys) if(!positions.ContainsKey(k)) throw new Exception("Gespeicherter Positionswert fehlt: "+k);
+  // Schreibziel vor jedem Schreiben prüfen (ab 2.68, siehe WriteTargetProblem)
+  string problem=WriteTargetProblem(e);
+  if(problem!=null)throw new Exception(problem+" – nicht geschrieben.");
   if(e.Registry) {
    var current=Capture(e);
-   string backup=Path.Combine(Root,"Sicherungen",DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+"-"+e.Id+"-"+Guid.NewGuid().ToString("N").Substring(0,6)+".json");
+   string backup=InFolder(Path.Combine(Root,"Sicherungen"),DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+"-"+SafeName(e.Id)+"-"+Guid.NewGuid().ToString("N").Substring(0,6)+".json");
    Write(backup,current);
    using(var key=Registry.CurrentUser.OpenSubKey(e.RegistryPath,true)) {
     if(key==null) throw new Exception("Registry-Schluessel fehlt.");
-    // Werteart wie vorhanden: Binärwerte stehen als Base64 in Positionen.json (z.B. DU Meter), Zahlen als Text.
+    // Werteart wie vorhanden: Binärwerte stehen als Base64 in Positionen.json (z.B. DU Meter), Zahlen als Text,
+    // Zeichenfolgenlisten als Liste. Ab 2.68 alles oder nichts: erst alle Werte prüfen und umwandeln (Werteart muss
+    // zur gespeicherten passen, nicht unterstützte Arten werden abgelehnt), dann schreiben; scheitert ein
+    // Schreibzugriff, werden die schon geänderten Werte mit Inhalt und Werteart von vorher zurückgesetzt.
+    var types=positions.ContainsKey(RegistryTypesKey)?positions[RegistryTypesKey] as Dictionary<string,object>:null;
+    var planned=new List<Tuple<string,object,RegistryValueKind>>();
+    var original=new List<Tuple<string,object,RegistryValueKind>>();
     foreach(string name in e.Keys) {
+     object old=key.GetValue(name,null,RegistryValueOptions.DoNotExpandEnvironmentNames);
+     if(old==null) throw new Exception("Registry-Wert fehlt: "+name);
      var kind=key.GetValueKind(name);
-     string text=Convert.ToString(positions[name]);
-     if(kind==RegistryValueKind.Binary)key.SetValue(name,Convert.FromBase64String(text),kind);
-     else if(kind==RegistryValueKind.DWord)key.SetValue(name,Int32.Parse(text),kind);
-     else if(kind==RegistryValueKind.QWord)key.SetValue(name,Int64.Parse(text),kind);
-     else key.SetValue(name,text,RegistryValueKind.String);
+     if(!SupportedKind(kind))throw new Exception("Registry-Wert „"+name+"“ hat eine nicht unterstützte Werteart ("+kind+") – nichts geändert.");
+     if(types!=null&&types.ContainsKey(name)) {
+      string saved=Convert.ToString(types[name],System.Globalization.CultureInfo.InvariantCulture);
+      if(!String.Equals(saved,kind.ToString(),StringComparison.Ordinal))
+       throw new Exception("Die Werteart von „"+name+"“ hat sich geändert (gespeichert "+saved+", jetzt "+kind+") – nichts geändert. Bitte die Position neu speichern.");
+     } else if(kind==RegistryValueKind.ExpandString||kind==RegistryValueKind.MultiString)
+      throw new Exception("Für „"+name+"“ fehlt die gespeicherte Werteart – nichts geändert. Bitte die Position neu speichern.");
+     object value;
+     try {value=RegistryFromJson(positions[name],kind);}
+     catch(Exception ex) {throw new Exception("Gespeicherter Wert „"+name+"“ ist ungültig – nichts geändert. "+ex.Message,ex);}
+     planned.Add(Tuple.Create(name,value,kind));
+     original.Add(Tuple.Create(name,old,kind));
+    }
+    int written=0;
+    try {
+     foreach(var item in planned){key.SetValue(item.Item1,item.Item2,item.Item3);written++;}
+    } catch(Exception ex) {
+     var failed=new List<string>();
+     // auch den Wert, bei dem der Fehler auftrat (falls er doch geändert wurde)
+     for(int i=0;i<=written&&i<original.Count;i++) {
+      try {key.SetValue(original[i].Item1,original[i].Item2,original[i].Item3);}
+      catch(Exception undo) {failed.Add(original[i].Item1+": "+undo.Message);}
+     }
+     if(failed.Count>0)throw new Exception("Registry-Werte nur teilweise geschrieben und nicht vollständig zurückgesetzt ("+String.Join("; ",failed.ToArray())+"). Sicherung der vorherigen Werte: "+Display(backup)+". Ursache: "+ex.Message,ex);
+     throw new Exception("Registry-Werte konnten nicht geschrieben werden; die vorherigen Werte wurden zurückgesetzt. "+ex.Message,ex);
     }
    }
   } else {
@@ -570,9 +878,22 @@ public static class TraceLog {
   try {
    lock(sync) {
     Directory.CreateDirectory(Folder);
-    System.IO.File.AppendAllText(Today,DateTime.Now.ToString("HH:mm:ss")+"  "+text+Environment.NewLine,new UTF8Encoding(false));
+    System.IO.File.AppendAllText(Today,DateTime.Now.ToString("HH:mm:ss")+"  "+OneLine(text)+Environment.NewLine,new UTF8Encoding(false));
    }
   } catch {}
+ }
+ // Eine Zeile je Eintrag (ab 2.68): Zeilenumbrüche und Steuerzeichen aus Programmnamen, Fenstertiteln usw. werden
+ // sichtbar maskiert (\n, \r, \t, \uXXXX), damit Folgezeilen nicht wie eigene Einträge aussehen.
+ public static string OneLine(string text) {
+  var sb=new StringBuilder();
+  foreach(char c in text??"") {
+   if(c=='\n')sb.Append("\\n");
+   else if(c=='\r')sb.Append("\\r");
+   else if(c=='\t')sb.Append("\\t");
+   else if(Char.IsControl(c)||c=='\u2028'||c=='\u2029'||c=='\u0085')sb.Append("\\u").Append(((int)c).ToString("X4"));
+   else sb.Append(c);
+  }
+  return sb.ToString();
  }
  public static void Cleanup(int days) {
   if(!Enabled)return;
@@ -594,7 +915,8 @@ static class SelfTest {
   Directory.CreateDirectory(test);Store.Root=test;Store.Profiles=Path.Combine(test,"Positionen.json");TraceLog.Enabled=false;
   bool ok=false;
   try {
-   string path=Path.Combine(test,"settings.json");
+   // Positionsdatei außerhalb des Einstellungsordners (dort schreibt Restore ab 2.68 nicht)
+   string path=Path.Combine(test+"-Programm","settings.json");
    Store.Write(path,new Dictionary<string,object>{{"windowState",new Dictionary<string,object>{{"x",1},{"y",2}}},{"other","unveraendert"}});
    var e=new Entry{Id="test",File=path,Keys=new[]{"windowState"}};
    var target=new Dictionary<string,object>{{"windowState",new Dictionary<string,object>{{"x",2208},{"y",13}}}};
@@ -637,7 +959,7 @@ static class SelfTest {
    Store.ExportSettings(export);
    var imported=Store.ReadSettings(export);
    if(imported.ContainsKey(Store.ExportKey))throw new Exception("Exportangaben nicht entfernt");
-   Store.ReplaceSettings(Store.PrepareImport(imported,true,true));
+   Store.ReplaceSettings(Store.PrepareImport(imported,true,true,null));
    if(Store.Json().Serialize(Store.LoadRaw())!=Store.Json().Serialize(imported))throw new Exception("Export/Import unterschiedlich");
    // Import-Regeln (ab 2.67): Netzwerkpfade und Sonderfälle nur mit Schalter, lokale Werte bleiben.
    foreach(string sample in new[]{@"\\server\x.exe",@"//server/x.exe",@"file://server/x.exe",@"\\?\UNC\server\x.exe",@"\\.\pipe\x"})
@@ -648,6 +970,15 @@ static class SelfTest {
    var list=(System.Collections.IList)foreign[Store.ProgramsKey];
    list.Add(new Dictionary<string,object>{{"Id","netz"},{"Name","Netz"},{"ProcessName","netz"},{"Exe",@"\\server\netz.exe"}});
    list.Add(new Dictionary<string,object>{{"Id","parameter"},{"Name","Parameter"},{"ProcessName","p"},{"Exe",@"C:\p.exe"},{"Args","--config=\"//server/p.ini\""}});
+   // Ab 2.68: fremder Startbefehl für ein hier bekanntes Programm und ein unbekanntes Programm mit Schreibziel
+   foreach(object o in list) {
+    var r=(Dictionary<string,object>)o;
+    if((string)r["Id"]=="discord")r["Args"]="--fremd";
+    if((string)r["Id"]=="dumeter")r["EndTask"]="Aufgabe";
+   }
+   list.Add(new Dictionary<string,object>{{"Id","neu"},{"Name","Neu"},{"ProcessName","neu"},{"Exe",@"C:\Windows\notepad.exe"},{"Args","--neu"},{"File",@"%APPDATA%\Neu\fenster.json"},{"Keys",new[]{"Bounds"}}});
+   list.Add(new Dictionary<string,object>{{"Id","run"},{"Name","Run"},{"ProcessName","run"},{"RegistryPath",@"Software\Microsoft\Windows\CurrentVersion\Run"},{"Keys",new[]{"X"}}});
+   list.Add(new Dictionary<string,object>{{"Id","..\\..\\x"},{"Name","Pfad"},{"ProcessName","pfad"}});
    foreign["_update"]=new Dictionary<string,object>{{"auto",false}};
    foreign["_nav"]=new Dictionary<string,object>{{"pinned",false}};
    var local=Store.LoadRaw();
@@ -655,12 +986,39 @@ static class SelfTest {
    Store.Write(Store.Profiles,local);
    var preview=Store.AnalyzeImport(foreign);
    if(preview.Count(x=>x.Network)!=2||preview.Count(x=>x.Special!=null)!=1)throw new Exception("Vorschau erkennt Netzwerkpfade/Sonderfälle nicht");
-   var safe=Store.PrepareImport(foreign,false,false);
+   if(preview.First(x=>x.Id=="discord").Known||!preview.First(x=>x.Id=="discord").Local||!preview.First(x=>x.Id=="easy2sync").Known)throw new Exception("Vorschau erkennt bekannte Startbefehle nicht");
+   if(preview.First(x=>x.Id=="run").Blocked==null||preview.First(x=>x.Id=="neu").Blocked!=null)throw new Exception("Schreibziele falsch geprüft");
+   var safe=Store.PrepareImport(foreign,false,false,null);
    var safePrograms=Store.ProgramsFrom(safe,Store.ProgramsKey);
-   if(safePrograms.Count!=expected||safePrograms.Any(x=>x.RestartService!=null||x.EndTask!=null))throw new Exception("Netzwerk/Sonderfälle ohne Zustimmung übernommen");
-   if(Store.ProgramsFrom(Store.PrepareImport(foreign,true,true),Store.ProgramsKey).Count!=expected+2)throw new Exception("Netzwerk-Programme trotz Zustimmung entfernt");
+   if(safePrograms.Count!=expected+3)throw new Exception("Netzwerk-Programme ohne Zustimmung übernommen: "+safePrograms.Count);
+   var safeDiscord=safePrograms.First(x=>x.Id=="discord");
+   var safeDumeter=safePrograms.First(x=>x.Id=="dumeter");
+   if(safeDiscord.Args!="--processStart Discord.exe"||safeDumeter.EndTask!=null||safeDumeter.RestartService!="DUMeterSvc")throw new Exception("Startbefehl ohne Freigabe übernommen");
+   var safeNew=safePrograms.First(x=>x.Id=="neu");
+   if(!safeNew.WindowOnly||!String.IsNullOrEmpty(safeNew.Exe)||safeNew.Args!=null||!safePrograms.First(x=>x.Id=="run").WindowOnly)throw new Exception("Unbekanntes Programm ohne Freigabe mit Start/Schreibziel übernommen");
+   // Freigabe gilt für den konkreten Datensatz (ab 2.68): Schlüssel aus der Vorschau
+   var approvedKeys=preview.Where(x=>new[]{"neu","discord","dumeter","run","netz"}.Contains(x.Id)).Select(x=>x.Key).ToList();
+   var freed=Store.ProgramsFrom(Store.PrepareImport(foreign,true,false,approvedKeys),Store.ProgramsKey);
+   if(freed.Count!=expected+5||freed.First(x=>x.Id=="neu").File==null||freed.First(x=>x.Id=="discord").Args!="--fremd")throw new Exception("Freigabe nicht übernommen");
+   if(freed.First(x=>x.Id=="dumeter").EndTask!=null||freed.First(x=>x.Id=="dumeter").RestartService!=null)throw new Exception("Sonderfälle ohne Schalter übernommen");
+   if(!freed.First(x=>x.Id=="run").WindowOnly||String.IsNullOrEmpty(freed.First(x=>x.Id=="netz").Exe))throw new Exception("Nicht zugelassenes Schreibziel trotz Freigabe übernommen");
+   if(!freed.First(x=>x.Id=="netz").AllowNetwork||freed.First(x=>x.Id=="neu").AllowNetwork)throw new Exception("Netzwerkfreigabe falsch gesetzt");
+   // Geänderter Datensatz nach der Vorschau: die Freigabe gilt nicht mehr
+   foreach(object o in list){var r=(Dictionary<string,object>)o;if((string)r["Id"]=="discord")r["Args"]="--anders";}
+   if(Store.ProgramsFrom(Store.PrepareImport(foreign,true,false,approvedKeys),Store.ProgramsKey).First(x=>x.Id=="discord").Args!="--processStart Discord.exe")throw new Exception("Freigabe auf anderen Datensatz übertragen");
+   // Doppelte Programm-Ids werden schon beim Lesen abgelehnt
+   var twice=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(foreign));
+   ((System.Collections.IList)twice[Store.ProgramsKey]).Add(new Dictionary<string,object>{{"Id","NEU"},{"Name","Doppelt"},{"ProcessName","x"},{"Exe",@"C:\x.exe"}});
+   string twiceFile=Path.Combine(test,"Doppelt.json");
+   Store.Write(twiceFile,twice);
+   bool duplicate=false;try{Store.ReadSettings(twiceFile);}catch{duplicate=true;}
+   if(!duplicate)throw new Exception("Doppelte Programm-Id nicht abgelehnt");
+   // Sicherungsnamen: Id wird bereinigt, Ziel bleibt im Sicherungsordner
+   if(Store.SafeName(@"..\..\x").Contains("\\")||Store.SafeName("..").Length==0||Store.SafeName(@"C:\Windows").Contains(":"))throw new Exception("Sicherungsname nicht bereinigt");
+   string escaped=Store.BackupFile(path,@"..\..\..\x");
+   if(!Path.GetFullPath(escaped).StartsWith(Path.Combine(test,"Sicherungen")+"\\",StringComparison.OrdinalIgnoreCase))throw new Exception("Sicherung außerhalb des Sicherungsordners");
    if(safe.ContainsKey("_nav")||!Convert.ToBoolean(((Dictionary<string,object>)safe["_update"])["auto"]))throw new Exception("Lokale Werte aus der Datei übernommen");
-   Store.ReplaceSettings(safe);
+   Store.ReplaceSettings(Store.PrepareImport(foreign,false,false,null));
    // Anordnungen: eigene Positionen je Anordnung, die Programmliste gilt für alle.
    Store.CreateArrangement("Spielen",loaded);
    var play=Store.Load();
@@ -675,10 +1033,57 @@ static class SelfTest {
    var again=Store.Load();
    Store.Override=null;
    if(Convert.ToInt32(again["_gap"])!=30||Store.Programs(again).Count!=expected)throw new Exception("Anordnung Spielen nicht gespeichert");
-   System.IO.File.WriteAllText(resultFile,"OK: Position wiederhergestellt, andere Einstellungen erhalten, Sicherung erstellt, unvollstaendige Werte abgewiesen, Profil, Programmliste (Übernahme), Export/Import (mit Import-Regeln) und Anordnungen gespeichert.");
+   // Registry (ab 2.68): Werteart und Rohwert bleiben erhalten (ExpandString nicht expandiert, MultiString als Liste),
+   // geänderte Werteart wird abgelehnt, gesperrte Bereiche werden nicht gelesen.
+   string regPath=@"Software\Fensterpositionen wiederherstellen\Selbsttest-"+Guid.NewGuid().ToString("N");
+   try {
+    using(var key=Registry.CurrentUser.CreateSubKey(regPath)) {
+     key.SetValue("Bin",new byte[]{1,2,3},RegistryValueKind.Binary);
+     key.SetValue("Dw",-5,RegistryValueKind.DWord);
+     key.SetValue("Qw",1234567890123L,RegistryValueKind.QWord);
+     key.SetValue("Txt","links",RegistryValueKind.String);
+     key.SetValue("Exp",@"%TEMP%\fenster",RegistryValueKind.ExpandString);
+     key.SetValue("Multi",new[]{"a","b"},RegistryValueKind.MultiString);
+    }
+    var reg=new Entry{Id="regtest",Name="Registry",ProcessName="regtest",Registry=true,RegistryPath=regPath,Keys=new[]{"Bin","Dw","Qw","Txt","Exp","Multi"}};
+    var saved=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(Store.Capture(reg)));
+    if(Convert.ToString(saved["Exp"])!=@"%TEMP%\fenster"||!(saved["Multi"] is System.Collections.IList)||!saved.ContainsKey(Store.RegistryTypesKey))throw new Exception("Registry nicht verlustfrei gelesen");
+    using(var key=Registry.CurrentUser.OpenSubKey(regPath,true)) {
+     key.SetValue("Bin",new byte[]{9},RegistryValueKind.Binary);
+     key.SetValue("Dw",7,RegistryValueKind.DWord);
+     key.SetValue("Exp",@"%APPDATA%\anders",RegistryValueKind.ExpandString);
+     key.SetValue("Multi",new[]{"x"},RegistryValueKind.MultiString);
+    }
+    Store.Restore(reg,saved);
+    using(var key=Registry.CurrentUser.OpenSubKey(regPath)) {
+     if(key.GetValueKind("Exp")!=RegistryValueKind.ExpandString||(string)key.GetValue("Exp",null,RegistryValueOptions.DoNotExpandEnvironmentNames)!=@"%TEMP%\fenster")throw new Exception("ExpandString nicht verlustfrei geschrieben");
+     if(String.Join("|",(string[])key.GetValue("Multi"))!="a|b"||(int)key.GetValue("Dw")!=-5||((byte[])key.GetValue("Bin")).Length!=3)throw new Exception("Registry-Werte nicht wiederhergestellt");
+    }
+    // Werteart geändert: nichts schreiben
+    using(var key=Registry.CurrentUser.OpenSubKey(regPath,true)) {key.SetValue("Txt",1,RegistryValueKind.DWord);key.SetValue("Dw",8,RegistryValueKind.DWord);}
+    bool typeRejected=false;try{Store.Restore(reg,saved);}catch{typeRejected=true;}
+    using(var key=Registry.CurrentUser.OpenSubKey(regPath)) if(!typeRejected||(int)key.GetValue("Dw")!=8)throw new Exception("Geänderte Werteart nicht abgelehnt");
+    // Ohne gespeicherte Werteart werden ExpandString/MultiString nicht geschrieben
+    var old=new Dictionary<string,object>(saved);old.Remove(Store.RegistryTypesKey);
+    using(var key=Registry.CurrentUser.OpenSubKey(regPath,true)) key.SetValue("Txt","links",RegistryValueKind.String);
+    bool oldRejected=false;try{Store.Restore(reg,old);}catch{oldRejected=true;}
+    if(!oldRejected)throw new Exception("ExpandString ohne Werteart geschrieben");
+    // Gesperrter Bereich wird nicht gelesen
+    bool readRejected=false;
+    try{Store.Capture(new Entry{Id="run",Name="Run",ProcessName="run",Registry=true,RegistryPath=@"Software\Microsoft\Windows\CurrentVersion\Run",Keys=new[]{"X"}});}catch{readRejected=true;}
+    if(!readRejected)throw new Exception("Gesperrter Registry-Bereich gelesen");
+    // Reservierter Name für die Wertearten wird als Registry-Wert abgelehnt
+    bool reservedRejected=false;
+    try{Store.Capture(new Entry{Id="regtest2",Name="Registry",ProcessName="regtest",Registry=true,RegistryPath=regPath,Keys=new[]{"Txt","_registrytypen"}});}catch{reservedRejected=true;}
+    if(!reservedRejected)throw new Exception("Reservierter Registry-Wertname akzeptiert");
+   } finally {
+    try {Registry.CurrentUser.DeleteSubKeyTree(regPath);} catch {}
+    try {using(var parent=Registry.CurrentUser.OpenSubKey(@"Software\Fensterpositionen wiederherstellen",true)) if(parent!=null&&parent.SubKeyCount==0&&parent.ValueCount==0)Registry.CurrentUser.DeleteSubKey(@"Software\Fensterpositionen wiederherstellen",false);} catch {}
+   }
+   System.IO.File.WriteAllText(resultFile,"OK: Position wiederhergestellt, andere Einstellungen erhalten, Sicherung erstellt, unvollstaendige Werte abgewiesen, Profil, Programmliste (Übernahme), Export/Import (mit Import-Regeln), Anordnungen und Registry (Werteart) geprüft.");
    ok=true;
   } catch(Exception ex) {System.IO.File.WriteAllText(resultFile,"FEHLER: "+ex);Environment.ExitCode=1;}
-  if(ok)try{Directory.Delete(test,true);}catch{}
+  if(ok)try{Directory.Delete(test,true);Directory.Delete(test+"-Programm",true);}catch{}
  }
 }
 }
