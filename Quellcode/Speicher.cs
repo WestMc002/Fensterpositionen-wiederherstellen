@@ -38,6 +38,11 @@ public class Entry {
  // z.B. "Steam" und "Freunde" bei steamwebhelper. Leer = Hauptfenster des Programms.
  public string WindowTitle;
 }
+// Ein Programm in der Vorschau beim Import (ab 2.67).
+public class ImportItem {
+ public string Name,Group,Target,Special;
+ public bool Network;
+}
 public static class Store {
  // Einstellungsordner: %LOCALAPPDATA%\Fensterpositionen wiederherstellen (Positionen.json, Sicherungen, TraceLogs).
  public const string FolderName="Fensterpositionen wiederherstellen";
@@ -250,8 +255,18 @@ public static class Store {
   raw[ExportKey]=new Dictionary<string,object>{{"Programm",AppInfo.Product},{"Version",AppInfo.Version},{"Datum",DateTime.Now.ToString("yyyy-MM-dd HH:mm")}};
   Write(path,raw);
  }
- // Liest eine exportierte Datei (auch eine Positionen.json oder Startwerte.json) und prüft sie grob.
+ // Import (Globale Richtlinien, Projektstruktur › Sicherung wiederherstellen; ab 2.67): erst vollständig lesen und
+ // mit Grenzen prüfen, dann Vorschau (ImportPreviewForm). Programme mit Netzwerkpfad und Sonderfälle (Dienst neu
+ // starten, geplante Aufgabe beenden) nur mit eigenem Schalter; PC-bezogene Werte bleiben lokal.
+ public const long ImportMaxBytes=8L*1024*1024;
+ public const int ImportMaxPrograms=500,ImportMaxArrangements=100;
+ // PC-bezogen, werden nie aus der Datei übernommen: Update-Schalter und letzte Prüfung ("_update"),
+ // Navigation angeheftet ("_nav", Stecknadel).
+ public static readonly string[] LocalKeys={"_update","_nav"};
+ // Liest eine exportierte Datei (auch eine Positionen.json oder Startwerte.json) und prüft sie.
  public static Dictionary<string,object> ReadSettings(string path) {
+  long size=new FileInfo(path).Length;
+  if(size>ImportMaxBytes)throw new Exception("Die Datei ist zu groß ("+(size/1024/1024)+" MB, höchstens "+(ImportMaxBytes/1024/1024)+" MB).");
   Dictionary<string,object> data;
   try {data=Read(path);}
   catch(Exception ex) {throw new Exception("Die Datei ist keine gültige JSON-Datei. "+ex.Message);}
@@ -259,14 +274,107 @@ public static class Store {
   data.Remove(ExportKey);
   bool known=data.ContainsKey(ProgramsKey)||data.ContainsKey(CustomKey)||data.ContainsKey(ArrangementsKey)||data.Values.Any(x=>x is Dictionary<string,object>);
   if(!known)throw new Exception("Die Datei enthält keine Einstellungen von "+AppInfo.Product+".");
+  foreach(string key in new[]{ProgramsKey,CustomKey}) {
+   var items=data.ContainsKey(key)?data[key] as System.Collections.ICollection:null;
+   if(items!=null&&items.Count>ImportMaxPrograms)throw new Exception("Die Datei enthält zu viele Programme ("+items.Count+", höchstens "+ImportMaxPrograms+").");
+  }
+  if(data.ContainsKey(ArrangementsKey)&&!(data[ArrangementsKey] is Dictionary<string,object>))throw new Exception("Die Anordnungen in der Datei sind ungültig.");
+  int arrangements=Arrangements(data).Count;
+  if(arrangements>ImportMaxArrangements)throw new Exception("Die Datei enthält zu viele Anordnungen ("+arrangements+", höchstens "+ImportMaxArrangements+").");
   return data;
  }
- // Ersetzt Positionen.json (vorher Sicherung) und legt bei älteren Dateien die Programmliste an.
+ // Liste der Programme, die die Datei mitbringt (ab 2.52 "_programme", bis 2.51 "_custom").
+ static string ImportListKey(Dictionary<string,object> data){return data.ContainsKey(ProgramsKey)?ProgramsKey:CustomKey;}
+ public static List<ImportItem> AnalyzeImport(Dictionary<string,object> data) {
+  var result=new List<ImportItem>();
+  foreach(var e in ProgramsFrom(data,ImportListKey(data))) {
+   string target=CompactPath(e.Exe)??"";
+   if(!String.IsNullOrEmpty(e.Args))target+=(target.Length>0?" ":"")+e.Args;
+   if(e.File!=null)target+=(target.Length>0?" · ":"")+"Datei "+CompactPath(e.File);
+   else if(e.Registry)target+=(target.Length>0?" · ":"")+"Registry HKCU\\"+e.RegistryPath;
+   var specials=new List<string>();
+   if(e.RestartService!=null)specials.Add("Dienst „"+e.RestartService+"“ neu starten");
+   if(e.EndTask!=null)specials.Add("geplante Aufgabe „"+e.EndTask+"“ beenden");
+   result.Add(new ImportItem{Name=e.Name,Group=e.Group,Target=target.Length>0?target:e.ProcessName+".exe",Network=UsesNetwork(e),Special=specials.Count>0?String.Join(", ",specials):null});
+  }
+  return result;
+ }
+ // Endgültige Einstellungen aus der Datei: Netzwerk-Programme bzw. Sonderfälle nur mit Zustimmung, lokale Werte
+ // (LocalKeys) aus der bisherigen Positionen.json. Ungültige Programmeinträge fallen weg.
+ public static Dictionary<string,object> PrepareImport(Dictionary<string,object> data,bool network,bool special) {
+  var copy=Json().Deserialize<Dictionary<string,object>>(Json().Serialize(data));
+  foreach(string key in new[]{ProgramsKey,CustomKey}) {
+   if(!copy.ContainsKey(key))continue;
+   var items=copy[key] as System.Collections.IEnumerable;
+   var kept=new List<object>();
+   if(items!=null&&!(copy[key] is string))
+    foreach(object item in items) {
+     var record=item as Dictionary<string,object>;
+     var e=ProgramFromRecord(record);
+     if(e==null)continue;
+     if(!network&&UsesNetwork(e))continue;
+     if(!special){record.Remove("RestartService");record.Remove("EndTask");}
+     kept.Add(record);
+    }
+   copy[key]=kept;
+  }
+  foreach(string key in LocalKeys)copy.Remove(key);
+  var current=System.IO.File.Exists(Profiles)?Read(Profiles):null;
+  if(current!=null)foreach(string key in LocalKeys)if(current.ContainsKey(key))copy[key]=current[key];
+  return copy;
+ }
+ // Netzwerkpfade (Globale Richtlinien, Sicherung wiederherstellen): nach ExpandEnvironmentVariables \\Server\…,
+ // \\?\UNC\…, //Server/…, file://Server/… und verbundene Netzlaufwerke (DriveType Network, ohne den Server anzusprechen).
+ // Gerätepfade: \\?\X:\ wird auf X:\ gekürzt, alle anderen gelten als Netzwerk.
+ public static bool IsNetworkPath(string path) {
+  if(String.IsNullOrEmpty(path))return false;
+  string p=Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')).Replace('/','\\');
+  if(p.StartsWith("file:",StringComparison.OrdinalIgnoreCase)) {
+   string rest=p.Substring(5).TrimStart('\\');
+   if(rest.Length>=2&&Char.IsLetter(rest[0])&&rest[1]==':')p=rest;else return true;
+  }
+  if(p.StartsWith(@"\\?\",StringComparison.Ordinal)) {
+   string rest=p.Substring(4);
+   if(rest.Length>=2&&Char.IsLetter(rest[0])&&rest[1]==':')p=rest;else return true;
+  }
+  if(p.StartsWith(@"\\",StringComparison.Ordinal))return true;
+  if(p.Length>=2&&Char.IsLetter(p[0])&&p[1]==':') {
+   try {return new DriveInfo(p.Substring(0,1)).DriveType==DriveType.Network;}
+   catch {return false;}
+  }
+  return false;
+ }
+ // Programm, Positionsdatei oder ein Pfad in den Parametern liegt im Netzwerk.
+ public static bool UsesNetwork(Entry e) {
+  if(IsNetworkPath(e.Exe)||IsNetworkPath(e.File))return true;
+  if(String.IsNullOrEmpty(e.Args))return false;
+  foreach(System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(e.Args,"\"([^\"]*)\"|(\\S+)")) {
+   string token=m.Groups[1].Success?m.Groups[1].Value:m.Groups[2].Value;
+   if(IsNetworkPath(token))return true;
+   int equals=token.IndexOf('=');
+   if(equals>=0&&IsNetworkPath(token.Substring(equals+1)))return true;
+  }
+  return false;
+ }
+ // Ersetzt Positionen.json (Globale Richtlinien): erst vollständig in eine Hilfsdatei schreiben und zurücklesen,
+ // dann den bisherigen Stand sichern (scheitert das, wird nichts ersetzt), dann austauschen; bei einem Fehler
+ // danach den alten Stand zurückholen. Bei älteren Dateien wird die Programmliste angelegt.
  // Gibt den Pfad der Sicherung zurück (null, wenn es noch keine Positionen.json gab).
  public static string ReplaceSettings(Dictionary<string,object> data) {
-  string backup=System.IO.File.Exists(Profiles)?BackupFile(Profiles,"vor-Import"):null;
-  Write(Profiles,data);
-  MigratePrograms();
+  Directory.CreateDirectory(Root);
+  string temp=Profiles+".import-"+Guid.NewGuid().ToString("N")+".tmp",backup=null;
+  try {
+   System.IO.File.WriteAllText(temp,Json().Serialize(data),new UTF8Encoding(false));
+   if(Read(temp)==null)throw new Exception("Die Hilfsdatei ist nicht lesbar.");
+   if(System.IO.File.Exists(Profiles))backup=BackupFile(Profiles,"vor-Import");
+   if(System.IO.File.Exists(Profiles))System.IO.File.Replace(temp,Profiles,null);
+   else System.IO.File.Move(temp,Profiles);
+  } finally {try {if(System.IO.File.Exists(temp))System.IO.File.Delete(temp);} catch {}}
+  try {MigratePrograms();}
+  catch {
+   if(backup!=null)try {System.IO.File.Copy(backup,Profiles,true);} catch {}
+   throw;
+  }
   return backup;
  }
  static string Field(Dictionary<string,object> d,string key){return d.ContainsKey(key)&&d[key]!=null?Convert.ToString(d[key]):null;}
@@ -529,8 +637,30 @@ static class SelfTest {
    Store.ExportSettings(export);
    var imported=Store.ReadSettings(export);
    if(imported.ContainsKey(Store.ExportKey))throw new Exception("Exportangaben nicht entfernt");
-   Store.ReplaceSettings(imported);
+   Store.ReplaceSettings(Store.PrepareImport(imported,true,true));
    if(Store.Json().Serialize(Store.LoadRaw())!=Store.Json().Serialize(imported))throw new Exception("Export/Import unterschiedlich");
+   // Import-Regeln (ab 2.67): Netzwerkpfade und Sonderfälle nur mit Schalter, lokale Werte bleiben.
+   foreach(string sample in new[]{@"\\server\x.exe",@"//server/x.exe",@"file://server/x.exe",@"\\?\UNC\server\x.exe",@"\\.\pipe\x"})
+    if(!Store.IsNetworkPath(sample))throw new Exception("Netzwerkpfad nicht erkannt: "+sample);
+   foreach(string sample in new[]{@"C:\Windows\notepad.exe",@"%WINDIR%\notepad.exe",@"\\?\C:\Windows\notepad.exe",@"file:///C:/Windows/notepad.exe",""})
+    if(Store.IsNetworkPath(sample))throw new Exception("Lokaler Pfad als Netzwerk erkannt: "+sample);
+   var foreign=Store.Json().Deserialize<Dictionary<string,object>>(Store.Json().Serialize(imported));
+   var list=(System.Collections.IList)foreign[Store.ProgramsKey];
+   list.Add(new Dictionary<string,object>{{"Id","netz"},{"Name","Netz"},{"ProcessName","netz"},{"Exe",@"\\server\netz.exe"}});
+   list.Add(new Dictionary<string,object>{{"Id","parameter"},{"Name","Parameter"},{"ProcessName","p"},{"Exe",@"C:\p.exe"},{"Args","--config=\"//server/p.ini\""}});
+   foreign["_update"]=new Dictionary<string,object>{{"auto",false}};
+   foreign["_nav"]=new Dictionary<string,object>{{"pinned",false}};
+   var local=Store.LoadRaw();
+   local["_update"]=new Dictionary<string,object>{{"auto",true}};
+   Store.Write(Store.Profiles,local);
+   var preview=Store.AnalyzeImport(foreign);
+   if(preview.Count(x=>x.Network)!=2||preview.Count(x=>x.Special!=null)!=1)throw new Exception("Vorschau erkennt Netzwerkpfade/Sonderfälle nicht");
+   var safe=Store.PrepareImport(foreign,false,false);
+   var safePrograms=Store.ProgramsFrom(safe,Store.ProgramsKey);
+   if(safePrograms.Count!=expected||safePrograms.Any(x=>x.RestartService!=null||x.EndTask!=null))throw new Exception("Netzwerk/Sonderfälle ohne Zustimmung übernommen");
+   if(Store.ProgramsFrom(Store.PrepareImport(foreign,true,true),Store.ProgramsKey).Count!=expected+2)throw new Exception("Netzwerk-Programme trotz Zustimmung entfernt");
+   if(safe.ContainsKey("_nav")||!Convert.ToBoolean(((Dictionary<string,object>)safe["_update"])["auto"]))throw new Exception("Lokale Werte aus der Datei übernommen");
+   Store.ReplaceSettings(safe);
    // Anordnungen: eigene Positionen je Anordnung, die Programmliste gilt für alle.
    Store.CreateArrangement("Spielen",loaded);
    var play=Store.Load();
@@ -545,7 +675,7 @@ static class SelfTest {
    var again=Store.Load();
    Store.Override=null;
    if(Convert.ToInt32(again["_gap"])!=30||Store.Programs(again).Count!=expected)throw new Exception("Anordnung Spielen nicht gespeichert");
-   System.IO.File.WriteAllText(resultFile,"OK: Position wiederhergestellt, andere Einstellungen erhalten, Sicherung erstellt, unvollstaendige Werte abgewiesen, Profil, Programmliste (Übernahme), Export/Import und Anordnungen gespeichert.");
+   System.IO.File.WriteAllText(resultFile,"OK: Position wiederhergestellt, andere Einstellungen erhalten, Sicherung erstellt, unvollstaendige Werte abgewiesen, Profil, Programmliste (Übernahme), Export/Import (mit Import-Regeln) und Anordnungen gespeichert.");
    ok=true;
   } catch(Exception ex) {System.IO.File.WriteAllText(resultFile,"FEHLER: "+ex);Environment.ExitCode=1;}
   if(ok)try{Directory.Delete(test,true);}catch{}

@@ -1,24 +1,34 @@
-# Fensterpositionen wiederherstellen - automatische Bereitstellung der EXE
-# Baut "Fensterpositionen wiederherstellen.exe" mit csc aus .NET Framework 4 (wie Erstellen.bat),
-# packt sie mit Anleitung.txt als ZIP (GitHub ersetzt Leerzeichen in Dateinamen von Release-Anhängen
-# durch Punkte, im ZIP bleibt der Originalname erhalten) und legt das Release v<Version> an.
-# Release-Seite: oben "Änderungen" (Zeilen mit "- " aus dem neuesten Commit, dessen Text die
-# Versionsnummer nennt), darunter die Installation.
-# Gibt es das Release zur Version schon, wird nichts neu gebaut; nur der Release-Text wird aufgefrischt.
-# Auslöser: "Run workflow" mit Versionsnummer oder Änderung dieser Datei auf main
-# (dann gilt die Version aus dem neuesten Commit-Text "Fensterpositionen wiederherstellen <Version>").
+# Fensterpositionen wiederherstellen - Release aus dem signierten Release-Paket
+# Das Paket entsteht auf dem PC des Herausgebers (Erstellen.bat: ZIP mit "Fensterpositionen
+# wiederherstellen.exe" und Anleitung.txt, dazu ein mit dem privaten Schluessel signiertes Manifest)
+# und liegt im Ordner Release. Der Workflow baut nichts selbst: Er prueft, dass ZIP und Manifest zur
+# Version passen (Name, Version, SHA-256 - die Signatur prueft erst das Programm, der Schluessel ist
+# nicht auf GitHub), und haengt beide an das Release.
+# Ausloeser: Aenderung dieser Datei auf main oder per Hand ueber "Run workflow"
+# (Eingabe der Versionsnummer). Ohne Eingabe gilt die Version aus dem neuesten
+# Commit "Fensterpositionen wiederherstellen <Version> - Aenderungen".
+# Gibt es das Release zur Version schon, wird nur der Text aufgefrischt.
+# Vorabversion: steht im Titel des Versions-Commits "Vorabversion", wird das Release als
+# Vorabversion (Pre-release) angelegt. Per Hand: Eingabe "vorab" = ja/nein, auto = wie im Commit.
+# Vorabversionen liefert /releases/latest nicht aus - die Update-Pruefung bietet sie nicht an.
 
 name: Release
 
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/release.yml']
+    paths: [.github/workflows/release.yml]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version, z. B. 2.22.2026.1101'
-        required: true
+        description: 'Version (z. B. 2.67.2026.1122)'
+        required: false
+      vorab:
+        description: 'Vorabversion (auto = wie im Commit-Titel)'
+        required: false
+        default: 'auto'
+        type: choice
+        options: [auto, ja, nein]
 
 permissions:
   contents: write
@@ -29,93 +39,112 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # ganze Historie, um den Commit zur Version zu finden
+          fetch-depth: 0
 
-      - name: Version bestimmen
+      - name: Version lesen
         id: ver
         shell: pwsh
         run: |
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
           $ver = '${{ github.event.inputs.version }}'
           if(-not $ver) {
-            $text = (git log --format=%B -n 200) -join "`n"
-            if($text -match 'Fensterpositionen wiederherstellen v?(\d+\.\d+\.\d{4}\.\d{4})') { $ver = $Matches[1] }
+            $subj = git log --format=%s | Where-Object { $_ -match '^Fensterpositionen wiederherstellen v?(\d+\.\d+\.\d+\.\d+)' } | Select-Object -First 1
+            if($subj -match '^Fensterpositionen wiederherstellen v?(\d+\.\d+\.\d+\.\d+)') { $ver = $Matches[1] }
           }
-          $ver = "$ver".TrimStart('v')
-          if($ver -notmatch '^\d+\.\d+\.\d{4}\.\d{4}$') { throw "Ungültige Version: $ver" }
-          "version=$ver" >> $env:GITHUB_OUTPUT
+          if($ver -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "keine gueltige Version gefunden: $ver" }
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+          # Vorabversion? Eingabe ja/nein hat Vorrang, sonst Titel des Versions-Commits
+          $vorab = '${{ github.event.inputs.vorab }}'
+          if(-not $vorab) { $vorab = 'auto' }
+          $pre = 0
+          if($vorab -eq 'ja') { $pre = 1 }
+          elseif($vorab -eq 'auto') {
+            $subj = git log --format=%s -F --grep="$ver" -n 1
+            if($subj -match 'Vorabversion') { $pre = 1 }
+          }
+          "pre=$pre" >> $env:GITHUB_OUTPUT
+          "vorab=$vorab" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $ver, Vorabversion: $pre"
           gh release view "v$ver" *> $null
-          if($LASTEXITCODE -eq 0) { "exists=true" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits - nur der Text wird aufgefrischt." }
-          else { "exists=false" >> $env:GITHUB_OUTPUT }
+          if($LASTEXITCODE -eq 0) { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits - nur Text auffrischen" }
+          else { "exists=0" >> $env:GITHUB_OUTPUT }
           exit 0
-
-      - name: Kompilieren
-        if: steps.ver.outputs.exists == 'false'
-        shell: pwsh
-        run: |
-          $ver = '${{ steps.ver.outputs.version }}'
-          @(
-            "[assembly: System.Reflection.AssemblyVersion(""$ver"")]"
-            "[assembly: System.Reflection.AssemblyFileVersion(""$ver"")]"
-            "[assembly: System.Reflection.AssemblyInformationalVersion(""$ver"")]"
-            "namespace Fensterpositionen { public static partial class AppInfo { public const string Version = ""$ver""; } }"
-          ) | Set-Content -Path 'Quellcode\VersionInfo.cs' -Encoding utf8
-          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          if(-not (Test-Path $csc)) { $csc = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
-          & $csc /nologo /target:winexe /optimize+ /codepage:65001 "/out:Fensterpositionen wiederherstellen.exe" `
-            "/win32icon:Resources\Fensterpositionen.ico" `
-            "/resource:Resources\Fensterpositionen.ico,Fensterpositionen.ico" `
-            "/resource:Resources\GS-Logo.png,GS-Logo.png" `
-            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
-            /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll Quellcode\*.cs
-          if($LASTEXITCODE -ne 0) { throw 'Kompilieren fehlgeschlagen' }
-          (Get-Item 'Fensterpositionen wiederherstellen.exe').VersionInfo.FileVersion
-
-      - name: ZIP packen
-        if: steps.ver.outputs.exists == 'false'
-        shell: pwsh
-        run: |
-          $ver = '${{ steps.ver.outputs.version }}'
-          New-Item -ItemType Directory -Path 'paket' | Out-Null
-          Copy-Item 'Fensterpositionen wiederherstellen.exe', 'Anleitung.txt' -Destination 'paket'
-          Compress-Archive -Path 'paket\*' -DestinationPath "Fensterpositionen-wiederherstellen-$ver.zip"
 
       - name: Release-Text erstellen
         shell: pwsh
         run: |
-          # "Änderungen" = Zeilen mit "- " aus dem neuesten Commit, dessen Text die Version nennt,
-          # sonst aus dem letzten Commit; darunter die Installation
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-          $ver = '${{ steps.ver.outputs.version }}'
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $ver = '${{ steps.ver.outputs.ver }}'
+          # neuester Commit, dessen Text die Versionsnummer nennt
           $sha = git log --format=%H -F --grep="$ver" -n 1
-          if(-not $sha) { $sha = git rev-parse HEAD }
-          $body = git log -1 --format=%b $sha
-          $items = @($body -split "`r?`n" | Where-Object { $_ -match '^\s*[-*] ' } | ForEach-Object { '- ' + ($_.Trim() -replace '^[-*]\s+', '') })
-          if($items.Count -eq 0) { $items = @('- siehe Anleitung.txt') }
-          $lines = @('## Änderungen', '') + $items + @(
-            '',
-            '## Installation',
-            '',
-            "1. ``Fensterpositionen-wiederherstellen-$ver.zip`` herunterladen und in einen eigenen Ordner mit Schreibrechten entpacken (nötig für die automatische Aktualisierung), z. B. ``C:\Tools\Fensterpositionen wiederherstellen``.",
-            '2. `Fensterpositionen wiederherstellen.exe` per Doppelklick starten.',
-            '3. Fenster anordnen, Programme anhaken und „Positionen speichern“ anklicken; weitere Programme über „Programm hinzufügen“ aufnehmen.',
-            '',
-            'Voraussetzung: Windows 10/11 mit .NET Framework 4 (in Windows enthalten). Gespeicherte Positionen, Sicherungen und Protokolle liegen unter `%LOCALAPPDATA%\Fensterpositionen wiederherstellen`; bei einem Update nur die EXE ersetzen. Ausführliche Beschreibung und Versionsgeschichte: `Anleitung.txt` im ZIP.'
-          )
-          $utf8 = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllLines((Join-Path $PWD 'release-notes.md'), [string[]]$lines, $utf8)
-          Get-Content 'release-notes.md'
+          $punkte = @()
+          if($sha) {
+            $punkte = @(git log -1 --format=%B $sha | Where-Object { $_ -match '^\s*- ' } | ForEach-Object { $_.Trim() })
+          }
+          $zeilen = New-Object System.Collections.Generic.List[string]
+          if('${{ steps.ver.outputs.pre }}' -eq '1') {
+            $zeilen.Add('> **Vorabversion** zum Testen. Die automatische Update-Prüfung bietet Vorabversionen nicht an.')
+            $zeilen.Add('')
+          }
+          if($punkte.Count -gt 0) {
+            $zeilen.Add('## Änderungen'); $zeilen.Add('')
+            foreach($p in $punkte) { $zeilen.Add($p) }
+            $zeilen.Add('')
+          }
+          $zeilen.Add('## Installation')
+          $zeilen.Add('')
+          $zeilen.Add("1. ``Fensterpositionen-wiederherstellen-$ver.zip`` herunterladen und in einen eigenen Ordner mit Schreibrechten entpacken (nötig für die automatische Aktualisierung), z. B. ``C:\Tools\Fensterpositionen wiederherstellen``.")
+          $zeilen.Add('2. `Fensterpositionen wiederherstellen.exe` per Doppelklick starten.')
+          $zeilen.Add('3. Fenster anordnen, Programme anhaken und „Positionen speichern“ anklicken; weitere Programme über „Programm hinzufügen“ aufnehmen.')
+          $zeilen.Add('')
+          $zeilen.Add('Voraussetzung: Windows 10/11 mit .NET Framework 4.5 oder neuer (in Windows enthalten). Update: Das Programm sieht selbst auf GitHub nach neuen Versionen und aktualisiert sich auf Klick. Signatur: `Fensterpositionen-wiederherstellen-<Version>.manifest` ist die signierte Prüfsumme des ZIP; installiert wird nur mit gültiger Signatur. Gespeicherte Positionen, Sicherungen und Protokolle liegen unter `%LOCALAPPDATA%\Fensterpositionen wiederherstellen`. Ausführliche Beschreibung und Versionsgeschichte: `Anleitung.txt` im ZIP.')
+          [IO.File]::WriteAllText("$PWD\notes.md", ($zeilen -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+          Get-Content notes.md -Encoding utf8
 
-      - name: Release anlegen
-        if: steps.ver.outputs.exists == 'false'
+      - name: Release-Paket pruefen
+        if: steps.ver.outputs.exists == '0'
         shell: pwsh
         run: |
-          $ver = '${{ steps.ver.outputs.version }}'
-          gh release create "v$ver" "Fensterpositionen-wiederherstellen-$ver.zip" --title "Fensterpositionen wiederherstellen $ver" --notes-file release-notes.md --target $env:GITHUB_SHA
+          $ver = '${{ steps.ver.outputs.ver }}'
+          $zip = "Release\Fensterpositionen-wiederherstellen-$ver.zip"
+          $man = "Release\Fensterpositionen-wiederherstellen-$ver.manifest"
+          if(-not (Test-Path -LiteralPath $zip)) { throw "Im Ordner Release fehlt $zip" }
+          if(-not (Test-Path -LiteralPath $man)) { throw "Im Ordner Release fehlt $man" }
+          $bytes = [IO.File]::ReadAllBytes($man)
+          if([Array]::IndexOf($bytes, [byte]13) -ge 0) { throw 'Das Manifest enthaelt CR (Zeilenende muss LF sein, sonst passt die Signatur nicht)' }
+          $werte = @{}
+          foreach($z in ([Text.Encoding]::UTF8.GetString($bytes) -split "`n")) { if($z -match '^([A-Za-z0-9]+)=(.*)$') { $werte[$Matches[1]] = $Matches[2] } }
+          if($werte['Programm'] -cne 'Fensterpositionen wiederherstellen') { throw "Manifest: Programm ist '$($werte['Programm'])'" }
+          if($werte['Version'] -cne $ver) { throw "Manifest: Version ist '$($werte['Version'])', erwartet $ver" }
+          if($werte['Datei'] -cne "Fensterpositionen-wiederherstellen-$ver.zip") { throw "Manifest: Datei ist '$($werte['Datei'])'" }
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($werte['SHA256'] -cne $hash) { throw "Manifest: SHA256 passt nicht zum ZIP ($hash)" }
+          if(-not $werte['Signatur']) { throw 'Manifest: Signatur fehlt' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $zip).Path)
+          try { $namen = @($z.Entries | ForEach-Object { $_.FullName }) } finally { $z.Dispose() }
+          if($namen -notcontains 'Fensterpositionen wiederherstellen.exe') { throw 'Im ZIP fehlt Fensterpositionen wiederherstellen.exe' }
+          if($namen -notcontains 'Anleitung.txt') { throw 'Im ZIP fehlt Anleitung.txt' }
+          Write-Host "Release-Paket in Ordnung: $($namen -join ', ') - SHA256 $hash, Schluessel $($werte['Schluessel'])"
+
+      - name: Release anlegen
+        if: steps.ver.outputs.exists == '0'
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.ver }}'
+          $ghArgs = @("v$ver", "Release\Fensterpositionen-wiederherstellen-$ver.zip", "Release\Fensterpositionen-wiederherstellen-$ver.manifest", '--title', "Fensterpositionen wiederherstellen $ver", '--notes-file', 'notes.md', '--target', $env:GITHUB_SHA)
+          if('${{ steps.ver.outputs.pre }}' -eq '1') { $ghArgs += '--prerelease' }
+          gh release create @ghArgs
 
       - name: Release-Text auffrischen
-        if: steps.ver.outputs.exists == 'true'
+        if: steps.ver.outputs.exists == '1'
         shell: pwsh
-        run: gh release edit "v${{ steps.ver.outputs.version }}" --notes-file release-notes.md
+        run: |
+          $ver = '${{ steps.ver.outputs.ver }}'
+          $ghArgs = @("v$ver", '--notes-file', 'notes.md')
+          # Vorabversion nur umstellen, wenn ausdrücklich gewählt (ja/nein)
+          if('${{ steps.ver.outputs.vorab }}' -eq 'ja') { $ghArgs += '--prerelease=true' }
+          if('${{ steps.ver.outputs.vorab }}' -eq 'nein') { $ghArgs += '--prerelease=false'; $ghArgs += '--latest' }
+          gh release edit @ghArgs

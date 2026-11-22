@@ -31,7 +31,7 @@ The interface is in German.
 - **Add any program:** pick any open window (with a search box), its position and size are saved right away. Rename or remove it with a right-click.
 - **Only what you use:** programs that are not installed are not shown; others can be hidden with a right-click (and shown again the same way) or removed. Change the order by drag & drop or sort by name; programs can be put into collapsible groups (e.g. “Kommunikation”) whose checkbox ticks all programs of the group at once. Groups can be moved and sorted on their own.
 - **Programs with several windows:** windows can be added one by one by their title, e.g. the Steam main window and the friends list, which “Kanten je Programm” then docks right next to it.
-- **Export and import settings:** the whole configuration with program list, positions, edges and arrangements as a JSON file, e.g. as a backup or for another PC; the current configuration is backed up before an import.
+- **Export and import settings:** the whole configuration with program list, positions, edges and arrangements as a JSON file, e.g. as a backup or for another PC. The import shows a preview first; programs on network paths and special cases (service restart, ending a scheduled task) are only taken over with their own switch, update settings stay local, and the current configuration is backed up before it is replaced.
 - **Align windows** to the visible window edge: top, bottom, left, right, centred horizontally (“↔ Mitte”) or vertically (“↕ Mitte”), or “Automatisch” with all edges you ticked for the program (top + bottom = full height, left + right = full width). The distance to the edge of the work area is adjustable (default 18 px). Invisible Windows borders and DPI scaling are taken into account. Your own programs have no edges preset – tick the ones you want. Each edge can get its own distance per program (e.g. left 1200 px), or take it from the window’s current position with “Messen”. An edge can also keep a distance to a neighbouring program instead of the screen edge (e.g. 18 px right of Discord). “Wiederherstellen” applies these edges after restoring.
 - **Align once:** click any open window (or pick it from the list of open windows) and align it without adding it to the list; nothing is saved. The page lists what was aligned recently.
 - **Several arrangements**, e.g. “Arbeit” and “Spielen”: each has its own positions and edges, switch with one click on the start page.
@@ -39,7 +39,7 @@ The interface is in German.
 - **Correction while starting:** saved alignment rules are re-applied while a program loads.
 - Nothing is selected at start – only the checked programs are processed.
 - Restart as administrator with one click (needed for programs running elevated).
-- **Update check** against the GitHub releases (shortly after every start, or from the About window); a newer version can be installed with one click (“Jetzt aktualisieren”) or automatically when the program is idle (“Automatisch aktualisieren”, off by default), settings are kept.
+- **Update check** against the GitHub releases (shortly after every start, or from the About window); a newer version can be installed with one click (“Jetzt aktualisieren”) or automatically when the program is idle (“Automatisch aktualisieren”, off by default), settings are kept. Only **signed updates** are installed (signed manifest with SHA-256 of the ZIP); files are replaced atomically with a journal, and an interrupted update can be rolled back.
 - **Log** in the window and as a daily log file (kept 30 days).
 - **Navigation on the left** like in my other programs: “Programme”, “Kanten je Programm” and “Einmalig ausrichten” are pages in the main window; settings menu at the bottom. Collapsible and pinnable.
 - Windows 11 design: light/dark mode and accent color follow Windows live; messages and questions in the same design.
@@ -64,6 +64,7 @@ Run `Erstellen.bat` in the project folder. It
 - compiles with the C# compiler of .NET Framework 4 (no other software needed),
 - assigns the version number automatically (Major.Minor.Year.MonthDay),
 - on request creates the screenshots for this page from demo data (`--screenshots`),
+- on request creates the signed release package in `Release` (ZIP and manifest; the private key stays outside the repository),
 - backs up the project to `Backup`.
 
 Self-test: `"Fensterpositionen wiederherstellen.exe" --self-test` (works only in the temp folder, result in `%TEMP%\Fensterpositionen wiederherstellen\Testergebnis.txt`).
@@ -82,7 +83,7 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 - **Beliebige Programme hinzufügen:** ein geöffnetes Fenster auswählen (mit Suchfeld), Position und Größe werden gleich gespeichert. Umbenennen und entfernen per Rechtsklick.
 - **Nur was du brauchst:** Programme, die nicht installiert sind, erscheinen nicht; andere lassen sich per Rechtsklick ausblenden (und genauso wieder anzeigen) oder entfernen. Die Reihenfolge lässt sich per Drag & Drop ändern oder nach Name sortieren; Programme lassen sich in einklappbare Gruppen ordnen (z. B. „Kommunikation“), deren Kästchen alle Programme der Gruppe auf einmal anhakt. Gruppen lassen sich verschieben und einzeln sortieren.
 - **Programme mit mehreren Fenstern:** Fenster lassen sich einzeln über ihren Titel aufnehmen, z. B. das Steam-Hauptfenster und die Freundesliste, die dann per „Kanten je Programm“ direkt daneben angedockt wird.
-- **Einstellungen exportieren und importieren:** die ganze Konfiguration mit Programmliste, Positionen, Kanten und Anordnungen als JSON-Datei, z. B. als Sicherung oder für einen anderen PC; vor dem Import wird die bisherige Konfiguration gesichert.
+- **Einstellungen exportieren und importieren:** die ganze Konfiguration mit Programmliste, Positionen, Kanten und Anordnungen als JSON-Datei, z. B. als Sicherung oder für einen anderen PC. Der Import zeigt erst eine Vorschau; Programme mit Netzwerkpfad und Sonderfälle (Dienst neu starten, geplante Aufgabe beenden) werden nur mit eigenem Schalter übernommen, Update-Einstellungen bleiben lokal, und die bisherige Konfiguration wird vor dem Ersetzen gesichert.
 - **Fenster ausrichten** an der sichtbaren Fensterkante: oben, unten, links, rechts, waagerecht („↔ Mitte“) oder senkrecht („↕ Mitte“) mittig, oder „Automatisch“ mit allen Kanten, die je Programm angehakt sind (oben + unten = volle Höhe, links + rechts = volle Breite). Der Abstand zum Rand des Arbeitsbereichs ist einstellbar (Standard 18 px). Unsichtbare Windows-Fensterrahmen und DPI-Skalierung werden berücksichtigt. Eigene Programme haben keine Kanten-Vorgabe – die gewünschten selbst anhaken. Jede Kante kann je Programm einen eigenen Abstand bekommen (z. B. links 1200 px) oder ihn mit „Messen“ von der aktuellen Fensterposition übernehmen. Statt zum Bildschirmrand kann eine Kante auch einen Abstand zu einem Nachbarprogramm halten (z. B. 18 px rechts neben Discord). „Wiederherstellen“ richtet diese Kanten danach aus.
 - **Einmalig ausrichten:** ein beliebiges offenes Fenster anklicken (oder aus der Liste der offenen Fenster wählen) und ausrichten, ohne es in die Liste aufzunehmen; nichts wird gespeichert. Die Seite zeigt, was zuletzt ausgerichtet wurde.
 - **Mehrere Anordnungen**, z. B. „Arbeit“ und „Spielen“: jede mit eigenen Positionen und Kanten, umschaltbar auf der Startseite.
@@ -90,7 +91,7 @@ Kleines Windows-Werkzeug, das die Fensterpositionen ausgewählter Programme sich
 - **Nachkorrektur beim Start:** gespeicherte Ausrichtungen werden während der Ladephase eines Programms erneut angewandt.
 - Beim Start ist nichts angehakt – bearbeitet wird nur, was angehakt ist.
 - Neustart als Administrator per Klick (nötig für Programme, die mit Administratorrechten laufen).
-- **Update-Prüfung** über die GitHub-Releases (kurz nach jedem Start oder im Info-Fenster); eine neuere Version lässt sich per Klick installieren („Jetzt aktualisieren“) oder automatisch, sobald das Programm nichts zu tun hat („Automatisch aktualisieren“, Standard aus), Einstellungen bleiben erhalten.
+- **Update-Prüfung** über die GitHub-Releases (kurz nach jedem Start oder im Info-Fenster); eine neuere Version lässt sich per Klick installieren („Jetzt aktualisieren“) oder automatisch, sobald das Programm nichts zu tun hat („Automatisch aktualisieren“, Standard aus), Einstellungen bleiben erhalten. Installiert werden nur **signierte Updates** (signiertes Manifest mit SHA-256 des ZIP); die Dateien werden mit Journal ausgetauscht, ein abgebrochenes Update lässt sich zurücksetzen.
 - **Protokoll** im Fenster und als Tagesdatei (30 Tage aufbewahrt).
 - **Navigation links** wie in meinen anderen Programmen: „Programme“, „Kanten je Programm“ und „Einmalig ausrichten“ sind Seiten im Hauptfenster; unten das Einstellungsmenü. Einklappbar und anpinnbar.
 - Windows-11-Design: Hell/Dunkel und Akzentfarbe folgen Windows sofort; Meldungen und Rückfragen im selben Design.
@@ -117,6 +118,7 @@ Ausführliche Anleitung: [Anleitung.txt](Anleitung.txt).
 - kompiliert mit dem C#-Compiler des .NET Framework 4 (keine weitere Software nötig),
 - vergibt die Versionsnummer automatisch (Haupt.Neben.Jahr.MonatTag),
 - erzeugt auf Nachfrage die Screenshots für diese Seite aus Beispieldaten (`--screenshots`),
+- erstellt auf Nachfrage das signierte Release-Paket in `Release` (ZIP und Manifest; der private Schlüssel liegt außerhalb des Repositorys),
 - sichert das Projekt unter `Backup`.
 
 Selbsttest: `"Fensterpositionen wiederherstellen.exe" --self-test` (arbeitet nur im Temp-Ordner, Ergebnis in `%TEMP%\Fensterpositionen wiederherstellen\Testergebnis.txt`).
@@ -163,6 +165,7 @@ The screenshots are created by the program itself from demo data (`--screenshots
 | `Resources` | icon and logo · Icon und Logo |
 | `Screenshots` | images for this page (demo view) · Bilder für diese Seite (Demo-Ansicht) |
 | `Erstellen.bat` | build script · Build-Skript |
+| `Release` | signed release package (ZIP and manifest) · signiertes Release-Paket (ZIP und Manifest) |
 | `Anleitung.txt` | manual (German) · Anleitung |
 
 ## License / Lizenz

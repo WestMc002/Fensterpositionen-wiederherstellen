@@ -287,9 +287,15 @@ public class MainForm:Form {
   if(skipped!=null)Log("Nicht installiert (nicht angezeigt): "+skipped);
   if(hiddenNames!=null)Log("Ausgeblendet: "+hiddenNames+" – Rechtsklick in die Liste zeigt sie wieder an.");
   if(AfterUpdate) {
+   // Ergebnis des Update-Skripts: OK, ZURUECK (vorherige Version wiederhergestellt), sonst nicht installiert.
+   // Meldung ohne Pfade und Technik; der Originaltext steht nur in der Protokolldatei.
    string result=Updater.LastResult();
    if(result!=null&&result.StartsWith("OK"))Log("Update auf Version "+result.Substring(2).Trim()+" installiert.");
-   else if(result!=null)Log("Update fehlgeschlagen: "+result.Replace("FEHLER","").Trim()+" – die bisherige Version läuft weiter.");
+   else if(result!=null&&result.StartsWith("ZURUECK"))Log("Vorherige Version wiederhergestellt – das Update kann jetzt erneut installiert werden.");
+   else if(result!=null) {
+    TraceLog.Write("Update nicht installiert: "+result);
+    Log("Update nicht installiert – die bisherige Version läuft weiter. Einzelheiten stehen in der Protokolldatei.");
+   }
   }
   // Update-Prüfung still ca. 15 s nach jedem Start (Globale Richtlinien, Updates; abschaltbar im Info-Fenster).
   // Beim Wiederherstellen per Verknüpfung nicht: Das Programm beendet sich dort nach wenigen Sekunden.
@@ -616,7 +622,7 @@ public class MainForm:Form {
     // Schon eine neue Version bekannt: gleich versuchen (erst nach dem Schließen des Info-Fensters).
     if(on&&available!=null)BeginInvoke((Action)TryAutoUpdate);
    },
-   CanInstall=()=>available!=null&&Updater.InstallBlocker()==null&&!String.IsNullOrEmpty(available.ZipUrl),
+   CanInstall=()=>Updater.CanInstall(available)||(available!=null&&Updater.RepairPending),
    Install=()=>BeginInvoke((Action)(async()=>await InstallUpdate(false))),
    OpenPage=()=>OpenReleasePage()
   };
@@ -662,6 +668,8 @@ public class MainForm:Form {
   string checkedText=last==DateTime.MinValue?"":"Zuletzt geprüft "+last.ToLocalTime().ToString("dd.MM.yyyy");
   // Fehler (auch beim automatischen Installieren) vor "Version x verfügbar": Kurzmeldung mit "Details".
   if(updateError!=null&&updateError.State==UpdateState.Error)return updateError;
+  // Ohne gültige Signatur: "Version x verfügbar" mit Kurzmeldung ("Nicht signiert." usw.) und "Details".
+  if(available!=null&&available.Problem!=null)return new UpdateStatus{State=UpdateState.Available,Text="Version "+available.Version+" verfügbar",Detail=available.Problem,More=available.ProblemDetail??""};
   if(available!=null)return new UpdateStatus{State=UpdateState.Available,Text="Version "+available.Version+" verfügbar",Detail=checkedText};
   if(updateError!=null)return updateError;
   if(last==DateTime.MinValue)return new UpdateStatus{State=UpdateState.Unknown,Text="Noch nicht geprüft",Detail=""};
@@ -684,7 +692,7 @@ public class MainForm:Form {
     if(fresh)Log("Neue Version "+release.Version+" auf GitHub verfügbar (installiert: "+AppInfo.Version+").");
     ShowUpdateBar(true);
     // "Automatisch aktualisieren": ohne Rückfrage installieren, sobald nichts mehr läuft (nicht bei "Jetzt prüfen").
-    if(!manual&&UpdateAutoInstall())BeginInvoke((Action)TryAutoUpdate);
+    if(!manual&&UpdateAutoInstall()&&Updater.CanInstall(release))BeginInvoke((Action)TryAutoUpdate);
    } else {
     available=null;
     ShowUpdateBar(false);
@@ -710,7 +718,7 @@ public class MainForm:Form {
  // "Automatisch aktualisieren": installieren, wenn nichts läuft – sonst alle 5 Minuten erneut versuchen.
  void TryAutoUpdate() {
   if(available==null||installing||DemoMode||!UpdateAutoInstall()||!UpdateAuto())return;
-  if(Updater.InstallBlocker()!=null||String.IsNullOrEmpty(available.ZipUrl))return;
+  if(!Updater.CanInstall(available)||Updater.Busy)return;
   if(BusyForUpdate()){autoUpdateRetry.Stop();autoUpdateRetry.Start();return;}
   BeginInvoke((Action)(async()=>await InstallUpdate(true)));
  }
@@ -720,9 +728,17 @@ public class MainForm:Form {
   int height=Ui.Px(64);
   if(show) {
    updateBar.Text="Neue Version "+available.Version+" verfügbar – installiert ist "+AppInfo.Version+".";
-   // Im Projektordner öffnet "Jetzt aktualisieren" die Release-Seite (dort wird nie ersetzt).
+   // Im Projektordner, ohne gültige Signatur oder mit Adminrechten öffnet "Jetzt aktualisieren" die Release-Seite;
+   // bei einem nicht abgeschlossenen Update bietet es die Wiederherstellung an.
    string blocker=Updater.InstallBlocker();
-   alignTips.SetToolTip(updateBar.Install,blocker!=null?blocker+"\r\nKlick öffnet stattdessen die Release-Seite.":"ZIP herunterladen, Programm beenden, EXE und Anleitung ersetzen und neu starten.\r\nGespeicherte Positionen und Einstellungen bleiben erhalten.");
+   if(blocker==null&&available.Problem!=null)blocker=AppInfo.Product+" installiert dieses Update nicht: "+available.Problem+" "+available.ProblemDetail;
+   bool repair=blocker==Updater.PendingText;
+   string tip=repair?blocker+"\r\nEin Klick stellt die vorherige Version wieder her.":
+    blocker!=null?blocker+"\r\nKlick öffnet stattdessen die Release-Seite.":
+    String.IsNullOrEmpty(available.ZipUrl)?"Im Release ist keine passende ZIP-Datei.\r\nKlick öffnet die Release-Seite.":
+    "Signiertes Update laden, Programm beenden, EXE und Anleitung ersetzen und neu starten.\r\nGespeicherte Positionen und Einstellungen bleiben erhalten.";
+   alignTips.SetToolTip(updateBar.Install,tip);
+   alignTips.SetToolTip(updateBar,String.IsNullOrEmpty(available.Notes)?"Die Änderungen stehen auf der Release-Seite.":"Änderungen:\r\n"+available.Notes);
   }
   // Fenster um die Hinweiszeile vergrößern bzw. verkleinern, soweit der Bildschirm reicht.
   Rectangle work=Screen.FromControl(this).WorkingArea;
@@ -741,22 +757,36 @@ public class MainForm:Form {
  // Kurzmeldung mit "Details" im Info-Fenster).
  async Task InstallUpdate(bool automatic) {
   if(busy||installing||available==null)return;
-  string blocker=Updater.InstallBlocker();
-  if(blocker!=null||String.IsNullOrEmpty(available.ZipUrl)) {
-   if(automatic)return;
-   Log((blocker??"Im Release ist keine ZIP-Datei angehängt.")+" Release-Seite wird geöffnet.");
-   OpenReleasePage();
+  var info=available;
+  if(!automatic&&Updater.Busy) {
+   MessageBox.Show(this,"Ein Update läuft bereits.","Update",MessageBoxButtons.OK,MessageBoxIcon.Information);
    return;
   }
-  if(!automatic&&MessageBox.Show(this,AppInfo.Product+" wird beendet, auf Version "+available.Version+" aktualisiert und neu gestartet. Einstellungen bleiben erhalten.\r\n\r\nJetzt aktualisieren?",
+  if(!automatic&&Updater.RepairPending) {
+   // Ein früheres Update wurde nicht abgeschlossen: erst die vorherige Version wiederherstellen.
+   if(Updater.OfferRepair(this,false)) {
+    Log("Vorherige Version wird wiederhergestellt – Fensterpositionen startet gleich neu.");
+    busy=false;
+    Close();
+   }
+   return;
+  }
+  if(!Updater.CanInstall(info)) {
+   if(automatic)return;
+   string why=Updater.InstallBlocker()??(info.Problem!=null?AppInfo.Product+" installiert dieses Update nicht: "+info.Problem+
+    (String.IsNullOrEmpty(info.ProblemDetail)?"":"\r\n\r\n"+info.ProblemDetail):"Im Release ist keine passende ZIP-Datei.");
+   if(MessageBox.Show(this,why+"\r\n\r\nRelease-Seite auf GitHub öffnen?","Update",MessageBoxButtons.YesNo,MessageBoxIcon.Information)==DialogResult.Yes)OpenReleasePage();
+   return;
+  }
+  if(!automatic&&MessageBox.Show(this,AppInfo.Product+" wird beendet, auf Version "+info.Version+" aktualisiert und neu gestartet. Einstellungen bleiben erhalten.\r\n\r\nJetzt aktualisieren?",
    "Update",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
   installing=true;
   SetBusy(true);
   foreach(var b in new[]{updateBar.Install,updateBar.Page,updateBar.Later})b.Enabled=false;
   string text=updateBar.Text;
   try {
-   Log("Lade Version "+available.Version+" …");
-   await Updater.Install(available,percent=>BeginInvoke((Action)(()=>updateBar.Text="Lade Version "+available.Version+" … "+percent+" %")));
+   Log("Lade Version "+info.Version+" …");
+   await Updater.Install(info,percent=>BeginInvoke((Action)(()=>updateBar.Text="Lade Version "+info.Version+" … "+percent+" %")),false);
    Log("Update wird "+(automatic?"automatisch ":"")+"installiert – Fensterpositionen startet gleich neu.");
    busy=false;
    Close();
@@ -1457,13 +1487,16 @@ public class MainForm:Form {
    try {data=Store.ReadSettings(file);}
    catch(Exception ex) {MessageBox.Show(this,"Die Datei kann nicht importiert werden.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
   }
-  int count=data.ContainsKey(Store.ProgramsKey)?Store.ProgramsFrom(data,Store.ProgramsKey).Count:Store.CustomEntries(data).Count;
-  int arrangements=Store.Arrangements(data).Count+1;
-  if(MessageBox.Show(this,"Programmliste, gespeicherte Positionen, Kanten und Anordnungen werden durch die Datei ersetzt ("+count+" Programme, "+arrangements+" Anordnung"+(arrangements==1?"":"en")+"). Die bisherigen Einstellungen werden vorher im Ordner Sicherungen abgelegt. "+AppInfo.Product+" startet danach neu.\r\n\r\nEinstellungen importieren?","Einstellungen importieren",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+  // Vorschau (ab 2.67): Netzwerkpfade und Sonderfälle nur mit eigenem Schalter, Vorauswahl „Abbrechen“.
+  bool network,special;
+  using(var preview=new ImportPreviewForm(Icon,file,Store.AnalyzeImport(data),Store.Arrangements(data).Count+1)) {
+   if(preview.ShowDialog(this)!=DialogResult.OK)return;
+   network=preview.Network;special=preview.Special;
+  }
   if(!ConfirmLeaveView())return;
   CloseView();
   string backup;
-  try {backup=Store.ReplaceSettings(data);}
+  try {data=Store.PrepareImport(data,network,special);backup=Store.ReplaceSettings(data);}
   catch(Exception ex) {Log("Einstellungen konnten nicht importiert werden – "+ex.Message);MessageBox.Show(this,"Die Einstellungen konnten nicht importiert werden.\r\n\r\n"+ex.Message,AppInfo.Product,MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
   Log("Einstellungen importiert aus "+Store.Display(file)+(backup!=null?" – Sicherung der bisherigen: "+Store.Display(backup):"")+". Programm wird neu gestartet …");
   try {Process.Start(new ProcessStartInfo(Application.ExecutablePath){UseShellExecute=true,WorkingDirectory=AppDomain.CurrentDomain.BaseDirectory});}

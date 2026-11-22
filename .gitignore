@@ -26,3 +26,8 @@ desktop.ini
 
 # Fehlerprotokoll der automatischen Screenshots
 Screenshots/Fehler.txt
+
+# Schluesseldateien (nie hochladen)
+*.key
+*.pfx
+*.snk

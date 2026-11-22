@@ -108,7 +108,7 @@ public class AboutForm:FixedSizeForm {
   moreBox=new Panel{BackColor=Ui.Bg,Visible=false,Padding=new Padding(Ui.Px(8),Ui.Px(6),Ui.Px(8),Ui.Px(6))};
   moreText=new TextBox{Multiline=true,ReadOnly=true,WordWrap=true,BorderStyle=BorderStyle.None,BackColor=Ui.Bg,ForeColor=Ui.TextColor,Font=detailFont,Dock=DockStyle.Fill,TabStop=false};
   moreBox.Controls.Add(moreText);
-  statusButton=new ModernButton("Jetzt prüfen",ButtonKind.Secondary,""){Height=Ui.Px(30),Margin=new Padding(0),GlyphFont=smallGlyphFont};
+  statusButton=new ModernButton("Jetzt prüfen",ButtonKind.Secondary,"\uE72C"){Height=Ui.Px(30),Margin=new Padding(0),GlyphFont=smallGlyphFont};
   statusButton.Click+=async(s,e)=>await StatusButtonClick();
   foreach(Control c in new Control[]{statusGlyph,statusText,statusDetail,moreLink,moreBox,statusButton})card.Controls.Add(c);
   statusButton.BringToFront();
@@ -196,11 +196,11 @@ public class AboutForm:FixedSizeForm {
  void ShowStatus(UpdateStatus st) {
   string glyph;Color color=Ui.Muted,textColor=Ui.TextColor;
   switch(st.State) {
-   case UpdateState.Current:glyph="";color=Ui.SuccessColor;break;
-   case UpdateState.Available:glyph="";color=Ui.Accent;textColor=Ui.Accent;break;
-   case UpdateState.Error:glyph="";color=Ui.ErrorColor;break;
-   case UpdateState.Checking:glyph="";textColor=Ui.Muted;break;
-   default:glyph="";break;
+   case UpdateState.Current:glyph="\uE930";color=Ui.SuccessColor;break;
+   case UpdateState.Available:glyph="\uE896";color=Ui.Accent;textColor=Ui.Accent;break;
+   case UpdateState.Error:glyph="\uE7BA";color=Ui.ErrorColor;break;
+   case UpdateState.Checking:glyph="\uE895";textColor=Ui.Muted;break;
+   default:glyph="\uE946";break;
   }
   statusGlyph.Glyph=glyph;statusGlyph.GlyphColor=color;
   statusText.Text=st.Text;statusText.ForeColor=textColor;
@@ -210,11 +210,11 @@ public class AboutForm:FixedSizeForm {
   moreValue=st.More??"";
   moreLink.Visible=moreValue.Length>0;
   if(st.State==UpdateState.Available&&hooks.CanInstall!=null&&hooks.CanInstall()) {
-   mode=ButtonMode.Install;statusButton.Text="Aktualisieren";statusButton.Kind=ButtonKind.Primary;statusButton.Glyph="";
+   mode=ButtonMode.Install;statusButton.Text="Aktualisieren";statusButton.Kind=ButtonKind.Primary;statusButton.Glyph="\uE896";
   } else if(st.State==UpdateState.Available) {
-   mode=ButtonMode.Page;statusButton.Text="Release-Seite";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="";
+   mode=ButtonMode.Page;statusButton.Text="Release-Seite";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="\uE71B";
   } else {
-   mode=ButtonMode.Check;statusButton.Text="Jetzt prüfen";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="";
+   mode=ButtonMode.Check;statusButton.Text="Jetzt prüfen";statusButton.Kind=ButtonKind.Secondary;statusButton.Glyph="\uE72C";
   }
   statusButton.Enabled=st.State!=UpdateState.Checking;
   // Neuer Stand: Feld schließen (auch wenn er keinen Detailtext hat).
@@ -354,7 +354,7 @@ public class AddProgramForm:FixedSizeForm {
   onlyThisLabel.Click+=(s,e)=>{if(onlyThis.Enabled)onlyThis.Checked=!onlyThis.Checked;};
   Controls.Add(onlyThis);Controls.Add(onlyThisLabel);
   y+=Ui.Px(28)+Ui.Px(14);
-  var refresh=new ModernButton("Aktualisieren",ButtonKind.Secondary,"");
+  var refresh=new ModernButton("Aktualisieren",ButtonKind.Secondary,"\uE72C");
   refresh.Location=new Point(pad,y);
   refresh.Click+=(s,e)=>LoadWindows();
   Controls.Add(refresh);
@@ -522,7 +522,7 @@ public class OneTimeAlignForm:FixedSizeForm {
   intro=new Label{Text="Ein beliebiges offenes Fenster anklicken oder unten in der Liste wählen, dann die Richtung anklicken. Es wird nicht in die Liste der Programme aufgenommen und nichts gespeichert.",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted"};
   Controls.Add(intro);
   card=new Card{Size=new Size(Ui.Px(600),Ui.Px(64))};
-  pick=new ModernButton("Fenster anklicken",ButtonKind.Primary,"");
+  pick=new ModernButton("Fenster anklicken",ButtonKind.Primary,"\uE7C9");
   pick.Click+=(s,e)=>StartPick();
   windowTitle=new Label{Text="Noch kein Fenster gewählt",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Surface,AutoEllipsis=true,UseMnemonic=false};
   windowDetail=new Label{Text="„Fenster anklicken“ und danach auf das gewünschte Fenster klicken – oder unten in der Liste wählen",Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Surface,Tag="muted",AutoEllipsis=true,UseMnemonic=false};
@@ -531,7 +531,7 @@ public class OneTimeAlignForm:FixedSizeForm {
   Controls.Add(card);
   string[] modes={"top","bottom","left","right","hcenter","vcenter"};
   string[] names={"Oben","Unten","Links","Rechts","↔ Mitte","↕ Mitte"};
-  string[] glyphs={"","","","",null,null};
+  string[] glyphs={"\uE74A","\uE74B","\uE72B","\uE72A",null,null};
   for(int i=0;i<modes.Length;i++) {
    var button=new ModernButton(names[i],ButtonKind.Secondary,glyphs[i]);
    string mode=modes[i],name=names[i];
@@ -543,7 +543,7 @@ public class OneTimeAlignForm:FixedSizeForm {
   // Links: offene Fenster zum Auswählen (falls das Fenster verdeckt ist), rechts: zuletzt ausgerichtet.
   listTitle=new Label{Text="Offene Fenster",Font=Ui.UiSemibold,ForeColor=Ui.TextColor,BackColor=Ui.Bg,AutoSize=true};
   Controls.Add(listTitle);
-  refresh=new ModernButton("Aktualisieren",ButtonKind.Ghost,"");
+  refresh=new ModernButton("Aktualisieren",ButtonKind.Ghost,"\uE72C");
   refresh.Height=Ui.Px(32);refresh.Margin=new Padding(0);
   refresh.Click+=(s,e)=>LoadWindows();
   Controls.Add(refresh);
@@ -1204,6 +1204,78 @@ public class AlignRulesForm:FixedSizeForm {
  }
 }
 // Einzelnes Häkchen (wie in der Programmliste), anklickbar und per Leertaste umschaltbar.
+// Vorschau beim Import (Globale Richtlinien, Sicherung wiederherstellen; ab 2.67): alle Programme der Datei mit
+// Ziel und Parametern. Programme mit Netzwerkpfad und Sonderfälle sind hervorgehoben und werden nur mit dem
+// eigenen Schalter übernommen (Standard aus); Vorauswahl ist „Abbrechen“.
+public class ImportPreviewForm:FixedSizeForm {
+ readonly ListBox items=new ListBox();
+ readonly CheckCell network=new CheckCell(),special=new CheckCell();
+ public bool Network{get{return network.Checked;}}
+ public bool Special{get{return special.Checked;}}
+ public ImportPreviewForm(Icon icon,string file,List<ImportItem> programs,int arrangements) {
+  Text="Einstellungen importieren";
+  StartPosition=FormStartPosition.CenterParent;AutoScaleMode=AutoScaleMode.None;
+  Font=Ui.UiFont;BackColor=Ui.Bg;ForeColor=Ui.TextColor;Icon=icon;
+  int w=Ui.Px(640),pad=Ui.Px(24),y=Ui.Px(4),inner=w-2*pad;
+  int networkCount=programs.Count(x=>x.Network),specialCount=programs.Count(x=>x.Special!=null);
+  var intro=new Label{Text="„"+Path.GetFileName(file)+"“: "+programs.Count+" Programm"+(programs.Count==1?"":"e")+", "+arrangements+" Anordnung"+(arrangements==1?"":"en")+". "+
+   "Programmliste, Positionen, Kanten und Anordnungen werden ersetzt; Update-Einstellungen und Navigation bleiben wie auf diesem PC. "+
+   "Die bisherigen Einstellungen werden vorher im Ordner Sicherungen abgelegt, danach startet "+AppInfo.Product+" neu.",
+   Font=Ui.SmallFont,ForeColor=Ui.Muted,BackColor=Ui.Bg,Tag="muted",UseMnemonic=false,Bounds=new Rectangle(pad,y,inner,Ui.Px(58))};
+  Controls.Add(intro);
+  y+=Ui.Px(64);
+  var listCard=new Card{Bounds=new Rectangle(pad,y,inner,Ui.Px(268)),Padding=new Padding(Ui.Px(4))};
+  items.Dock=DockStyle.Fill;items.BorderStyle=BorderStyle.None;items.IntegralHeight=false;
+  items.DrawMode=DrawMode.OwnerDrawFixed;items.ItemHeight=Ui.Px(44);
+  items.BackColor=Ui.Surface;items.ForeColor=Ui.TextColor;
+  items.DrawItem+=DrawItem;
+  items.HandleCreated+=(s,e)=>Native.DarkScroll(items);
+  foreach(var item in programs)items.Items.Add(item);
+  listCard.Controls.Add(items);
+  Controls.Add(listCard);
+  y+=listCard.Height+Ui.Px(14);
+  y=AddSwitch(network,"Programme mit Netzwerkpfad übernehmen ("+networkCount+") – Windows meldet sich dabei eventuell mit deinem Benutzerkonto am Server an",networkCount>0,pad,y,inner);
+  y=AddSwitch(special,"Sonderfälle übernehmen ("+specialCount+") – Dienst neu starten, geplante Aufgabe beenden (braucht Administratorrechte)",specialCount>0,pad,y,inner);
+  y+=Ui.Px(14);
+  var import=new ModernButton("Importieren",ButtonKind.Primary,null);
+  var cancel=new ModernButton("Abbrechen",ButtonKind.Secondary,null);
+  import.DialogResult=DialogResult.OK;cancel.DialogResult=DialogResult.Cancel;
+  import.Location=new Point(w-pad-import.Width,y);
+  cancel.Location=new Point(import.Left-Ui.Px(10)-cancel.Width,y);
+  Controls.Add(cancel);Controls.Add(import);
+  CancelButton=cancel;AcceptButton=cancel;
+  y+=Ui.Px(38)+Ui.Px(20);
+  ClientSize=new Size(w,y);
+  ActiveControl=cancel;
+ }
+ int AddSwitch(CheckCell box,string text,bool enabled,int pad,int y,int inner) {
+  box.BackColor=Ui.Bg;box.Enabled=enabled;box.Bounds=new Rectangle(pad-Ui.Px(6),y,Ui.Px(30),Ui.Px(28));
+  var label=new Label{Text=text,Font=Ui.SmallFont,ForeColor=enabled?Ui.TextColor:Ui.Muted,BackColor=Ui.Bg,AutoEllipsis=true,UseMnemonic=false,
+   TextAlign=ContentAlignment.MiddleLeft,Cursor=enabled?Cursors.Hand:Cursors.Default,Bounds=new Rectangle(box.Right+Ui.Px(4),y,inner-Ui.Px(28),Ui.Px(28))};
+  label.Click+=(s,e)=>{if(box.Enabled)box.Checked=!box.Checked;};
+  Controls.Add(box);Controls.Add(label);
+  return y+Ui.Px(30);
+ }
+ void DrawItem(object sender,DrawItemEventArgs e) {
+  var g=e.Graphics;
+  using(var back=new SolidBrush(Ui.Surface)) g.FillRectangle(back,e.Bounds);
+  if(e.Index<0||e.Index>=items.Items.Count)return;
+  var item=(ImportItem)items.Items[e.Index];
+  var r=Rectangle.Inflate(e.Bounds,-Ui.Px(2),-Ui.Px(2));
+  var flags=TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.EndEllipsis|TextFormatFlags.Left|TextFormatFlags.NoPadding;
+  int x=r.X+Ui.Px(14),width=r.Width-Ui.Px(24);
+  // Hinweise rechts in der ersten Zeile (Warnfarbe), Name links davon.
+  var notes=new List<string>();
+  if(item.Network)notes.Add("Netzwerkpfad");
+  if(item.Special!=null)notes.Add("Sonderfall: "+item.Special);
+  string note=String.Join(" · ",notes);
+  int noteWidth=note.Length==0?0:Math.Min(width*3/5,TextRenderer.MeasureText(g,note,Ui.SmallFont,Size.Empty,flags).Width+Ui.Px(2));
+  if(noteWidth>0)TextRenderer.DrawText(g,note,Ui.SmallFont,new Rectangle(x+width-noteWidth,r.Y+Ui.Px(5),noteWidth,Ui.Px(18)),Ui.WarningColor,flags|TextFormatFlags.Right);
+  string name=item.Name+(String.IsNullOrEmpty(item.Group)?"":" · "+item.Group);
+  TextRenderer.DrawText(g,name,Ui.UiSemibold,new Rectangle(x,r.Y+Ui.Px(4),width-noteWidth-(noteWidth>0?Ui.Px(12):0),Ui.Px(20)),Ui.TextColor,flags);
+  TextRenderer.DrawText(g,item.Target,Ui.SmallFont,new Rectangle(x,r.Y+Ui.Px(22),width,Ui.Px(18)),item.Network?Ui.WarningColor:Ui.Muted,flags);
+ }
+}
 public class CheckCell:Control {
  bool isChecked;
  public CheckCell() {
