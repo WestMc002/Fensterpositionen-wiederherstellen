@@ -283,6 +283,7 @@ public class MainForm:Form {
   TraceLog.Cleanup(30);
   if(migrated!=null)Log(migrated);
   if(programsMigrated!=null)Log(programsMigrated);
+  if(Store.StartNote!=null)Log(Store.StartNote);
   if(programsError!=null)Log(programsError);
   Log("Positionen: "+Store.Display(Store.Profiles)+(activeArrangement!=Store.StandardName?" – Anordnung „"+activeArrangement+"“":""));
   Log("Protokolldatei: "+Store.Display(TraceLog.Today));
@@ -813,10 +814,14 @@ public class MainForm:Form {
     return assembly.GetManifestResourceStream(resource);
   return null;
  }
- // Datei im Ordner Resources neben der EXE, sonst direkt neben der EXE.
+ // Datei im Ordner Resources neben der EXE, sonst direkt neben der EXE. Nur wenn der Pfad lokal ist und über keine
+ // Umleitung führt (Store.SafeToTouch); sonst null, dann gilt das eingebettete Bild bzw. keines.
  static string ProjectFile(string name) {
+  bool missing;
   string inResources=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Resources",name);
-  return System.IO.File.Exists(inResources)?inResources:Path.Combine(AppDomain.CurrentDomain.BaseDirectory,name);
+  if(Store.SafeToTouch(inResources,out missing)&&!missing)return inResources;
+  string beside=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,name);
+  return Store.SafeToTouch(beside,out missing)&&!missing?beside:null;
  }
  // Signatur-Logo: eingebettet (Erstellen.bat) oder Datei GS-Logo.png neben der EXE.
  internal static Bitmap LoadSignature() {
@@ -825,7 +830,7 @@ public class MainForm:Form {
     if(stream!=null)using(var image=Image.FromStream(stream))return new Bitmap(image);
    }
    string file=ProjectFile("GS-Logo.png");
-   if(System.IO.File.Exists(file))using(var image=Image.FromFile(file))return new Bitmap(image);
+   if(file!=null&&System.IO.File.Exists(file))using(var image=Image.FromFile(file))return new Bitmap(image);
   } catch {}
   return null;
  }
@@ -837,7 +842,7 @@ public class MainForm:Form {
    }
    if(data==null) {
     string ico=ProjectFile("Fensterpositionen.ico");
-    if(System.IO.File.Exists(ico))data=System.IO.File.ReadAllBytes(ico);
+    if(ico!=null&&System.IO.File.Exists(ico))data=System.IO.File.ReadAllBytes(ico);
    }
    if(data!=null) {
     Bitmap frame=IconFrame(data,size);
@@ -1544,65 +1549,139 @@ public class MainForm:Form {
   if(e.EndTask!=null)EndScheduledTask(e.EndTask);
   // Nur Prozesse dieses Programms (OwnProcesses); gleichnamige fremde Prozesse bleiben unberührt.
   var skipped=new HashSet<string>();
-  bool running=false;
-  foreach(var p in OwnProcesses(e,skipped)) using(p) {
-   try { if(!p.HasExited){running=true;p.CloseMainWindow();} }
-   catch(InvalidOperationException){}
+  var first=OwnProcesses(e,skipped);
+  // Läuft das Programm aus diesem Ordner in dieser Sitzung, aber nicht prüfbar als eigener Prozess (z.B. mit
+  // Adminrechten oder über "Als anderer Benutzer ausführen"), wird nichts geändert: sonst würde in die Einstellungen eines laufenden Programms
+  // geschrieben und ein zweites gestartet.
+  foreach(string id in skipped) {
+   int pid;
+   if(Int32.TryParse(id,out pid)&&InExeFolder(pid,e)) {
+    foreach(var p in first)p.Dispose();
+    throw new Exception("Läuft mit anderen Rechten oder unter einem anderen Konto (PID: "+id+") – wird nicht beendet. Bitte selbst beenden und erneut versuchen.");
+   }
   }
   if(skipped.Count>0) {
    string pids=String.Join(", ",skipped.ToArray());
-   BeginInvoke((Action)(()=>Log(e.Name+": gleichnamige Prozesse aus einem anderen Ordner bzw. einer anderen Sitzung bleiben unberührt (PID: "+pids+").")));
+   BeginInvoke((Action)(()=>Log(e.Name+": gleichnamige Prozesse aus einem anderen Ordner, einer anderen Sitzung oder einem anderen Benutzerkonto bleiben unberührt (PID: "+pids+").")));
+  }
+  bool running=false;
+  foreach(var p in first) using(p) {
+   try { if(!p.HasExited){running=true;p.CloseMainWindow();} }
+   catch(InvalidOperationException){}
   }
   if(!running)return false;
   // Electron applications may hide in the tray and spawn helper processes.
-  // Allow a normal exit first, then repeatedly collect and stop remaining processes of this program.
-  // Erzwungen beendet wird ab 2.68 nur mit "ForceKill" oder nach Rückfrage, und dann nur genau die Prozesse,
-  // die die Rückfrage genannt hat (Prozess-ID und Startzeit); später neu gestartete bleiben unberührt.
+  // Allow a normal exit first (WM_CLOSE über CloseMainWindow, 5 Sekunden), then stop remaining processes of this program.
+  // Erzwungen beendet wird nur mit "ForceKill" oder nach Rückfrage, und dann nur genau die Prozesse, die beim
+  // Durchlauf über ein offenes Handle gebunden wurden (PID plus Startzeit, eigener Pfad, eigene Sitzung, eigenes
+  // Benutzerkonto); beendet wird über dieses Handle (TerminateProcess). Später gestartete bleiben unberührt.
   var timer=Stopwatch.StartNew();
-  HashSet<string> confirmed=new HashSet<string>();
+  var targets=new List<BoundProcess>();
   bool force=false;
-  while(timer.ElapsedMilliseconds<20000) {
-   var processes=OwnProcesses(e,null);
-   if(processes.Count==0) {
-    Thread.Sleep(500);
-    var check=OwnProcesses(e,null);
-    bool empty=check.Count==0;
-    foreach(var p in check)p.Dispose();
-    if(empty)return true;
-    continue;
-   }
-   if(!force&&timer.ElapsedMilliseconds>=2500) {
-    // Zielmenge einmal je Durchlauf festlegen – auch mit "ForceKill" (das spart nur die Rückfrage). Prozesse ohne
-    // lesbare Startzeit gehören nie dazu (ab 2.68).
-    var keys=new HashSet<string>(processes.Select(ProcessKey).Where(x=>x!=null));
-    if(!e.ForceKill) {
-     string answer=AskForceKill(e,processes);
-     if(answer==null) {
-      foreach(var p in processes)p.Dispose();
-      throw new Exception("Nicht beendet – reagiert nicht auf das normale Schließen. Bitte selbst beenden und erneut versuchen.");
-     }
+  try {
+   while(timer.ElapsedMilliseconds<20000) {
+    var processes=OwnProcesses(e,null);
+    if(processes.Count==0) {
+     Thread.Sleep(500);
+     var check=OwnProcesses(e,null);
+     bool empty=check.Count==0;
+     foreach(var p in check)p.Dispose();
+     if(empty)return true;
+     continue;
     }
-    confirmed=keys;
-    force=true;
-    timer=Stopwatch.StartNew();
-   }
-   foreach(var p in processes) using(p) {
-    try {
-     if(p.HasExited)continue;
-     if(!force) p.CloseMainWindow();
-     else {
-      string key=ProcessKey(p);
-      if(key!=null&&confirmed.Contains(key)) {p.Kill();p.WaitForExit(1500);}
+    if(!force&&timer.ElapsedMilliseconds>=5000) {
+     foreach(var p in processes) {
+      BoundProcess bound=null;
+      try {bound=BindProcess(p.Id,e);} catch {}
+      if(bound!=null)targets.Add(bound);
      }
-    } catch(InvalidOperationException){} // Process exited between enumeration and access.
+     if(targets.Count==0) {
+      foreach(var p in processes)p.Dispose();
+      throw new Exception("Nicht beendet – reagiert nicht auf das normale Schließen und lässt sich nicht sicher erzwungen beenden. Bitte selbst beenden und erneut versuchen.");
+     }
+     if(!e.ForceKill) {
+      string answer=AskForceKill(e,targets.Select(x=>x.Pid).ToList());
+      if(answer==null) {
+       foreach(var p in processes)p.Dispose();
+       throw new Exception("Nicht beendet – reagiert nicht auf das normale Schließen. Bitte selbst beenden und erneut versuchen.");
+      }
+     }
+     force=true;
+     timer=Stopwatch.StartNew();
+    }
+    foreach(var p in processes) using(p) {
+     try {if(!force)p.CloseMainWindow();}
+     catch(InvalidOperationException){} // Process exited between enumeration and access.
+    }
+    if(force)
+     foreach(var t in targets)
+      if(!t.Done) {TerminateProcess(t.Handle,1);t.Done=WaitForSingleObject(t.Handle,1500)==0;}
+    Thread.Sleep(250);
    }
-   Thread.Sleep(250);
-  }
+  } finally {foreach(var t in targets)CloseHandle(t.Handle);}
   var remaining=OwnProcesses(e,null);
   string ids=String.Join(", ",remaining.Select(p=>p.Id.ToString()).ToArray());
   foreach(var p in remaining)p.Dispose();
   if(remaining.Count==0)return true;
   throw new Exception("Programm ist nach 20 Sekunden noch aktiv (PID: "+ids+"). Bitte vollstaendig beenden und erneut versuchen.");
+ }
+ // Über ein offenes Handle gebundener Prozess (PID plus Startzeit): Solange das Handle offen ist, kann Windows die
+ // Prozess-ID nicht neu vergeben; beendet wird nur über dieses Handle.
+ sealed class BoundProcess {
+  public int Pid;
+  public long Start;
+  public IntPtr Handle;
+  public bool Done;
+ }
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr process,uint exitCode);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool ProcessIdToSessionId(int pid,out int session);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,int access,out IntPtr token);
+ // Handle öffnen (TERMINATE | SYNCHRONIZE | QUERY_LIMITED_INFORMATION) und über genau dieses Handle prüfen, dass es
+ // ein Prozess dieses Programms ist (IsOwnProcess); sonst null.
+ static BoundProcess BindProcess(int pid,Entry e) {
+  IntPtr h=OpenProcess(0x0001|0x100000|0x1000,false,pid);
+  if(h==IntPtr.Zero)return null;
+  long creation,exit,kernel,user;
+  if(!GetProcessTimes(h,out creation,out exit,out kernel,out user)||creation==0||!IsOwnProcess(h,pid,e)) {CloseHandle(h);return null;}
+  return new BoundProcess{Pid=pid,Start=creation,Handle=h};
+ }
+ static readonly string OwnSid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
+ static int OwnSession() {using(var self=Process.GetCurrentProcess())return self.SessionId;}
+ // Prozess dieses Programms (ab 2.71): Programmdatei im Ordner der eingetragenen EXE oder darunter (Electron-Helfer
+ // liegen in Unterordnern, z.B. Discord\app-1.0\Discord.exe neben Update.exe), eigene Windows-Sitzung und eigenes
+ // Benutzerkonto. Alles über das übergebene Handle geprüft; was sich nicht lesen lässt, gilt nicht als eigener Prozess.
+ static bool IsOwnProcess(IntPtr h,int pid,Entry e) {
+  if(!ImageInExeFolder(h,e))return false;
+  int session;
+  if(!ProcessIdToSessionId(pid,out session)||session!=OwnSession())return false;
+  IntPtr token;
+  if(!OpenProcessToken(h,0x0008,out token))return false; // TOKEN_QUERY
+  try {
+   using(var identity=new System.Security.Principal.WindowsIdentity(token))
+    return identity.User!=null&&identity.User.Value==OwnSid;
+  } catch {return false;}
+  finally {CloseHandle(token);}
+ }
+ // Programmdatei des Prozesses (Handle) liegt im Ordner der eingetragenen EXE oder darunter.
+ static bool ImageInExeFolder(IntPtr h,Entry e) {
+  string folder;
+  try {
+   if(String.IsNullOrEmpty(e.Exe))return false;
+   folder=Path.GetDirectoryName(Path.GetFullPath(e.Exe)).TrimEnd('\\')+"\\";
+  } catch {return false;}
+  var name=new StringBuilder(1024);
+  int size=name.Capacity;
+  if(!QueryFullProcessImageName(h,0,name,ref size))return false;
+  try {return Path.GetFullPath(name.ToString(0,size)).StartsWith(folder,StringComparison.OrdinalIgnoreCase);} catch {return false;}
+ }
+ static bool InExeFolder(int pid,Entry e) {
+  IntPtr h=OpenProcess(0x1000,false,pid); // PROCESS_QUERY_LIMITED_INFORMATION
+  if(h==IntPtr.Zero)return false;
+  try {
+   int session;
+   return ImageInExeFolder(h,e)&&ProcessIdToSessionId(pid,out session)&&session==OwnSession();
+  } finally {CloseHandle(h);}
  }
  // Geplante Aufgabe beenden (EndTask): Aufgabe über die Aufgabenplanung suchen; läuft sie (State 4 = Running),
  // Stop aufrufen und höchstens 5 Sekunden auf das Ende warten. Fehlt die Aufgabe oder scheitert etwas: Ausnahme mit Grund.
@@ -1641,26 +1720,11 @@ public class MainForm:Form {
   var inner=ex is TargetInvocationException&&ex.InnerException!=null?ex.InnerException:ex;
   return inner.Message;
  }
- // Prozess eindeutig: Prozess-ID und Startzeit (eine wiederverwendete ID gilt nicht als derselbe Prozess). Die
- // Startzeit kommt über GetProcessTimes mit eingeschränktem Abfragerecht (geht auch bei Programmen mit Adminrechten);
- // ist sie nicht lesbar, null – solche Prozesse werden nie erzwungen beendet (ab 2.68).
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr process,out long creation,out long exit,out long kernel,out long user);
- static string ProcessKey(Process p) {
-  int id;
-  try {id=p.Id;} catch {return null;}
-  IntPtr h=OpenProcess(0x1000,false,id); // PROCESS_QUERY_LIMITED_INFORMATION
-  if(h==IntPtr.Zero)return null;
-  try {
-   long creation,exit,kernel,user;
-   if(!GetProcessTimes(h,out creation,out exit,out kernel,out user)||creation==0)return null;
-   return id+":"+creation;
-  } finally {CloseHandle(h);}
- }
  // Rückfrage vor dem erzwungenen Beenden (ab 2.68): "einmal", "immer" (künftig ohne Rückfrage, "ForceKill") oder
  // null (nicht beenden, vorausgewählt). Läuft im Hintergrund-Thread, die Rückfrage selbst im Fenster-Thread.
- string AskForceKill(Entry e,List<Process> processes) {
-  var ids=new List<string>();
-  foreach(var p in processes)try {ids.Add(p.Id.ToString());} catch {}
+ string AskForceKill(Entry e,List<int> pids) {
+  var ids=pids.Select(x=>x.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToList();
   string answer=null;
   Invoke((Action)(()=>{
    using(var dialog=new ForceKillForm(Icon,e.Name,e.ProcessName,ids)) {
@@ -1681,41 +1745,25 @@ public class MainForm:Form {
    profiles=copy;
   } catch(Exception ex) {Log(e.Name+": Einstellung „ohne Rückfrage beenden“ konnte nicht gespeichert werden – "+ex.Message);}
  }
- // Prozesse eines Programms (ab 2.68): gleicher Prozessname, gleiche Windows-Sitzung und Programmdatei im Ordner der
- // eingetragenen EXE oder darunter (Electron-Helfer liegen in Unterordnern, z.B. Discord\app-1.0\Discord.exe neben
- // Update.exe). Der Pfad wird über QueryFullProcessImageName gelesen (geht auch bei Programmen mit Adminrechten).
+ // Prozesse eines Programms: gleicher Prozessname und IsOwnProcess (Ordner der EXE, eigene Sitzung, eigenes Konto).
  // Ohne eingetragene EXE oder lesbaren Pfad gilt ein Prozess nicht als eigener und wird nie beendet.
  [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(int access,bool inherit,int pid);
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr process,int flags,StringBuilder name,ref int size);
  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
- static string ImagePath(int pid) {
-  IntPtr h=OpenProcess(0x1000,false,pid); // PROCESS_QUERY_LIMITED_INFORMATION
-  if(h==IntPtr.Zero)return null;
-  try {
-   var name=new StringBuilder(1024);
-   int size=name.Capacity;
-   return QueryFullProcessImageName(h,0,name,ref size)?name.ToString(0,size):null;
-  } finally {CloseHandle(h);}
- }
  static List<Process> OwnProcesses(Entry e,HashSet<string> skipped) {
   var result=new List<Process>();
-  string folder=null;
-  try {if(!String.IsNullOrEmpty(e.Exe))folder=Path.GetDirectoryName(Path.GetFullPath(e.Exe)).TrimEnd('\\')+"\\";} catch {}
-  int session;
-  using(var self=Process.GetCurrentProcess())session=self.SessionId;
   foreach(var p in Process.GetProcessesByName(e.ProcessName)) {
    bool mine=false;
    try {
-    if(folder!=null&&!p.HasExited&&p.SessionId==session) {
-     string path=ImagePath(p.Id);
-     mine=path!=null&&Path.GetFullPath(path).StartsWith(folder,StringComparison.OrdinalIgnoreCase);
-    }
+    IntPtr h=OpenProcess(0x1000,false,p.Id); // PROCESS_QUERY_LIMITED_INFORMATION
+    if(h!=IntPtr.Zero) try {mine=IsOwnProcess(h,p.Id,e);} finally {CloseHandle(h);}
    } catch {}
    if(mine)result.Add(p);
    else {if(skipped!=null)skipped.Add(p.Id.ToString());p.Dispose();}
   }
   return result;
  }
+
  // Nachkorrektur beim Start und nach Wiederherstellen: alle angehakten Kanten aus "Kanten je Programm"
  // mit ihren eigenen Abständen (wie "Automatisch"); ohne angehakte Kante bleibt die gespeicherte Position.
  string StartupRule(Entry e) {

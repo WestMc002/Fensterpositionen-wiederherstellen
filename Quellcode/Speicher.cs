@@ -699,12 +699,59 @@ public static class Store {
  // Startwerte.json liegt im Ordner Resources (früher direkt neben der EXE). Sie enthält eigene Startpositionen
  // und ab 2.52 die Programmliste ("_programme") für neue Einstellungen; StartOverride nur für den Selbsttest.
  public static string StartOverride;
+ // Automatischer Zugriff (Globale Richtlinien 25.11.2026, „Automatische Dateizugriffe“): Startwerte.json wird nur
+ // gelesen, wenn der Programmordner lokal ist und über keine Umleitung führt (SafeToTouch); sonst leere Startwerte und
+ // ein Hinweis im Protokoll (StartNote).
+ public static string StartNote;
  static Dictionary<string,object> LoadStart() {
-  string start=StartOverride??Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Resources","Startwerte.json");
-  if(!System.IO.File.Exists(start))start=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Startwerte.json");
+  string folder=AppDomain.CurrentDomain.BaseDirectory;
+  bool missing;
+  if(StartOverride==null&&!SafeToTouch(folder,out missing)) {
+   StartNote="Startwerte.json nicht gelesen: Der Programmordner liegt im Netzwerk, in OneDrive oder hinter einer Verknüpfung (Reparse Point).";
+   return new Dictionary<string,object>();
+  }
+  string start=StartOverride??Path.Combine(folder,"Resources","Startwerte.json");
+  if(StartOverride==null&&!(SafeToTouch(start,out missing)&&!missing))start=Path.Combine(folder,"Startwerte.json");
   // Ohne Startwerte (z.B. nur die EXE aus einem GitHub-Release) mit leeren Positionen beginnen.
+  if(StartOverride==null&&!(SafeToTouch(start,out missing)&&!missing))return new Dictionary<string,object>();
   if(!System.IO.File.Exists(start))return new Dictionary<string,object>();
   return Read(start);
+ }
+ // Automatische Dateizugriffe (Globale Richtlinien 25.11.2026, Referenz RDP Pilot 1.58, RdpFile.SafeToTouch):
+ // true = lokaler Pfad ohne Umleitung, darf ohne ausdrückliche Auswahl gelesen werden; missing = existiert nicht.
+ // Jeder Pfadteil wird von der Wurzel an geprüft, ohne einem Reparse Point zu folgen; Netzwerk, OneDrive und
+ // jeder Zweifel = false.
+ public static bool SafeToTouch(string path,out bool missing) {
+  missing=false;
+  if(String.IsNullOrEmpty(path)||IsNetworkPath(path)||UnderOneDrive(path))return false;
+  try {
+   string full=Path.GetFullPath(path);
+   string root=Path.GetPathRoot(full);
+   if(String.IsNullOrEmpty(root)||root.Length!=3||root[1]!=':')return false;
+   string current=root;
+   foreach(string part in full.Substring(root.Length).Split(new[]{'\\'},StringSplitOptions.RemoveEmptyEntries)) {
+    current=Path.Combine(current,part);
+    FileAttributes attributes;
+    try {attributes=System.IO.File.GetAttributes(current);}
+    catch(FileNotFoundException){missing=true;return true;}
+    catch(DirectoryNotFoundException){missing=true;return true;}
+    if((attributes&FileAttributes.ReparsePoint)!=0)return false;
+   }
+   return true;
+  } catch {return false;}
+ }
+ // OneDrive-Ordner (OneDrive, OneDriveConsumer, OneDriveCommercial) zählen als Umleitung.
+ static bool UnderOneDrive(string path) {
+  try {
+   string full=Path.GetFullPath(path).TrimEnd('\\')+"\\";
+   foreach(string name in new[]{"OneDrive","OneDriveConsumer","OneDriveCommercial"}) {
+    string od=Environment.GetEnvironmentVariable(name);
+    if(String.IsNullOrEmpty(od))continue;
+    od=Path.GetFullPath(od).TrimEnd('\\')+"\\";
+    if(full.StartsWith(od,StringComparison.OrdinalIgnoreCase))return true;
+   }
+   return false;
+  } catch {return true;}
  }
  // Sicherungsdateien (ab 2.68): Der Dateiname wird intern gebildet; die Programm-Id (aus Positionen.json, auch
  // importiert) geht nur als bereinigter Namensteil ein, und das Ziel muss im neuen Sicherungsordner liegen.
