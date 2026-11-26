@@ -250,7 +250,7 @@ namespace Fensterpositionen
             if (values["Programm"] != ManifestProgram) { detail = "Das Manifest gehört zu „" + values["Programm"] + "“, nicht zu " + ManifestProgram + "."; return Invalid; }
             if (values["Version"] != version) { detail = "Das Manifest nennt Version " + values["Version"] + ", das Release " + version + "."; return Invalid; }
             if (values["Datei"] != AssetName(version)) { detail = "Das Manifest nennt die Datei „" + values["Datei"] + "“."; return Invalid; }
-            if (!Regex.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
+            if (!RxMatch(values["SHA256"], "^[0-9a-f]{64}$").Success) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
             sha = values["SHA256"].ToUpperInvariant();
             return null;
         }
@@ -445,7 +445,7 @@ namespace Fensterpositionen
         /// <summary>Gültige Versuchskennung (32 Hex-Zeichen, klein)?</summary>
         public static bool IsAttemptId(string id)
         {
-            return id != null && Regex.IsMatch(id, "^[0-9a-f]{32}$");
+            return id != null && RxMatch(id, "^[0-9a-f]{32}$").Success;
         }
 
         /// <summary>
@@ -835,6 +835,18 @@ namespace Fensterpositionen
         /// Journal streng prüfen – dieselben Regeln wie im Reparatur-Skript. false = Stand ungeklärt (nichts aufräumen,
         /// Wiederherstellung endet mit OFFEN). Bei true enthält entries alle „Vorher“-Einträge in Reihenfolge.
         /// </summary>
+        /// <summary>
+        /// Regex auf fremde Daten (Manifest, Journal, Kennungen) nur mit Zeitlimit 250 ms (Globale Richtlinien,
+        /// Regex-Prüfungen fremder Daten). Zeitüberschreitung = nicht eindeutig prüfbar: ergibt einen Fehlschlag
+        /// (Match.Empty), der Aufrufer lehnt dann ab.
+        /// </summary>
+        private static readonly TimeSpan RxTimeout = TimeSpan.FromMilliseconds(250);
+        internal static Match RxMatch(string input, string pattern)
+        {
+            try { return Regex.Match(input ?? "", pattern, RegexOptions.None, RxTimeout); }
+            catch (RegexMatchTimeoutException) { return Match.Empty; }
+        }
+
         private static bool ReadJournal(string dir, out List<JournalEntry> entries)
         {
             entries = null;
@@ -870,7 +882,7 @@ namespace Fensterpositionen
             {
                 for (; i < lines.Length && lines[i].StartsWith("Geplant ", StringComparison.Ordinal); i++)
                 {
-                    Match g = Regex.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$");
+                    Match g = RxMatch(lines[i], @"^Geplant (\d+): Ziel: ([^|]+)$");
                     if (!g.Success || g.Groups[1].Value != (planned.Count + 1).ToString(CultureInfo.InvariantCulture) || !allowed(g.Groups[2].Value)) return false;
                     string p = g.Groups[2].Value;
                     if (planned.Exists(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase))) return false;
@@ -887,7 +899,7 @@ namespace Fensterpositionen
             for (; i < lines.Length; i++)
             {
                 string line = lines[i];
-                Match e = Regex.Match(line, @"^Ersetzt (\d+)$");
+                Match e = RxMatch(line, @"^Ersetzt (\d+)$");
                 if (e.Success)
                 {
                     if (list.Count == 0 || replacedLast || e.Groups[1].Value != list[list.Count - 1].N) return false;
@@ -895,8 +907,8 @@ namespace Fensterpositionen
                     continue;
                 }
                 Match m = withHash
-                    ? Regex.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$")
-                    : Regex.Match(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)()(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$");
+                    ? RxMatch(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: ([^|]+)(?: \| Sicherungsdatei: [^|]+ \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: ([^|]+)$")
+                    : RxMatch(line, @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: ([^|]+)()(?: \| Sicherungsdatei: [^|]+)? \| Hilfsdatei: ([^|]+)$");
                 if (!m.Success) return false;
                 JournalEntry entry = new JournalEntry();
                 entry.N = m.Groups[1].Value; entry.Kind = m.Groups[2].Value; entry.Dst = m.Groups[3].Value;
@@ -1223,8 +1235,8 @@ function Show-Result {
   } catch {}
   if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.' }
   $icon = 'Warning'
-  if ($text -match '^OK ') { $icon = 'Information' }
-  $text = $text -replace '^(OK|FEHLER|ZURUECK|OFFEN) ', ''
+  if ($text.StartsWith('OK ')) { $icon = 'Information' }
+  foreach ($k in @('OK ', 'FEHLER ', 'ZURUECK ', 'OFFEN ')) { if ($text.StartsWith($k)) { $text = $text.Substring($k.Length); break } }
   try {
     Add-Type -AssemblyName System.Windows.Forms
     [void][System.Windows.Forms.MessageBox]::Show($text, 'Fensterpositionen', 'OK', $icon)
@@ -1306,6 +1318,12 @@ try {
 ";
 
         private const string InstallScript = @"
+# Regex auf fremde Daten (Datei, Journal, Manifest, Ordnernamen) nur mit Zeitlimit 250 ms; Zeitueberschreitung =
+# nicht eindeutig pruefbar, Abbruch (Globale Richtlinien, Regex-Pruefungen fremder Daten)
+function Rx([string]$s, [string]$p) {
+  try { return [System.Text.RegularExpressions.Regex]::Match($s, $p, [System.Text.RegularExpressions.RegexOptions]::None, [TimeSpan]::FromMilliseconds(250)) }
+  catch [System.Text.RegularExpressions.RegexMatchTimeoutException] { throw 'Nicht eindeutig pruefbar (Zeitlimit bei der Pruefung).' }
+}
 $ErrorActionPreference = 'Stop'
 # Dateien begrenzt lesen bzw. kopieren; waehrenddessen darf niemand schreiben (FileShare.Read). Bei Ueberschreitung Abbruch, Teilkopie weg.
 function Read-Limited([string]$path, [long]$max) {
@@ -1388,11 +1406,12 @@ try {
           $o = (Get-Acl -LiteralPath $_.FullName).GetOwner([System.Security.Principal.SecurityIdentifier])
           if ($o -eq $admins -or $o -eq $system) {
             $inactive = $false
-            if ($_.Name -match '^Fensterpositionen-Update-([0-9A-F]{24})-[0-9a-f]{32}$') {
-              if ($Matches[1] -ceq $TargetId) { $inactive = $true }
+            $dm = Rx $_.Name '^Fensterpositionen-Update-([0-9A-F]{24})-[0-9a-f]{32}$'
+            if ($dm.Success) {
+              if ($dm.Groups[1].Value -ceq $TargetId) { $inactive = $true }
               else {
                 $held = $true
-                try { $other = $null; $held = [System.Threading.Mutex]::TryOpenExisting('Global\Fensterpositionen-Update-' + $Matches[1], [ref]$other); if ($other) { $other.Dispose() } } catch { $held = $true }
+                try { $other = $null; $held = [System.Threading.Mutex]::TryOpenExisting('Global\Fensterpositionen-Update-' + $dm.Groups[1].Value, [ref]$other); if ($other) { $other.Dispose() } } catch { $held = $true }
                 $inactive = (-not $held) -and ($_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddHours(-1))
               }
             } else {
@@ -1448,7 +1467,7 @@ try {
   $rsa.Clear()
   if (-not $valid) { throw 'Die Signatur des Updates ist ungueltig.' }
   if ($mv['Programm'] -cne 'Fensterpositionen wiederherstellen' -or $mv['Version'] -cne $Version -or $mv['Datei'] -cne $AssetName) { throw 'Das Manifest passt nicht zu diesem Update.' }
-  if ($mv['SHA256'] -cnotmatch '^[0-9a-f]{64}$') { throw 'Die Pruefsumme im Manifest ist ungueltig.' }
+  if (-not (Rx $mv['SHA256'] '^[0-9a-f]{64}$').Success) { throw 'Die Pruefsumme im Manifest ist ungueltig.' }
   $expected = $mv['SHA256'].ToUpperInvariant()
   if ($expected -ne $Sha256) { throw 'Die Pruefsumme im Manifest weicht von der Pruefung im Programm ab.' }
   # ZIP einmal oeffnen (waehrenddessen darf niemand schreiben oder loeschen), Pruefsumme ueber genau diesen Stream
@@ -1694,8 +1713,8 @@ function Show-Result {
   } catch {}
   if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.' }
   $icon = 'Warning'
-  if ($text -match '^OK ') { $icon = 'Information' }
-  $text = $text -replace '^(OK|FEHLER|ZURUECK|OFFEN) ', ''
+  if ($text.StartsWith('OK ')) { $icon = 'Information' }
+  foreach ($k in @('OK ', 'FEHLER ', 'ZURUECK ', 'OFFEN ')) { if ($text.StartsWith($k)) { $text = $text.Substring($k.Length); break } }
   try {
     Add-Type -AssemblyName System.Windows.Forms
     [void][System.Windows.Forms.MessageBox]::Show($text, 'Fensterpositionen', 'OK', $icon)
@@ -1748,6 +1767,12 @@ try {
 ";
 
         private const string RepairScript = @"
+# Regex auf fremde Daten (Datei, Journal, Manifest, Ordnernamen) nur mit Zeitlimit 250 ms; Zeitueberschreitung =
+# nicht eindeutig pruefbar, Abbruch (Globale Richtlinien, Regex-Pruefungen fremder Daten)
+function Rx([string]$s, [string]$p) {
+  try { return [System.Text.RegularExpressions.Regex]::Match($s, $p, [System.Text.RegularExpressions.RegexOptions]::None, [TimeSpan]::FromMilliseconds(250)) }
+  catch [System.Text.RegularExpressions.RegexMatchTimeoutException] { throw 'Nicht eindeutig pruefbar (Zeitlimit bei der Pruefung).' }
+}
 $ErrorActionPreference = 'Stop'
 $result = $null
 $noRestart = $false
@@ -1856,12 +1881,13 @@ try {
     $i = 2
   }
   if ($format2) { $first = 'Geplant ' } elseif ($format155) { $first = 'Bereit' } else { $first = 'Vorher ' }
-  while ($i -lt $lines.Count -and -not $lines[$i].StartsWith($first)) { if ($lines[$i] -cmatch $keywords) { throw 'Das Journal ist nicht lesbar.' }; $i++ }
+  while ($i -lt $lines.Count -and -not $lines[$i].StartsWith($first)) { if ((Rx $lines[$i] $keywords).Success) { throw 'Das Journal ist nicht lesbar.' }; $i++ }
   if ($format2) {
     while ($i -lt $lines.Count -and $lines[$i].StartsWith('Geplant ')) {
-      if ($lines[$i] -cnotmatch '^Geplant (\d+): Ziel: (.+)$') { throw 'Das Journal ist nicht lesbar.' }
-      if ($Matches[1] -ne [string]($planned.Count + 1) -or $allowed -notcontains $Matches[2] -or $planned -contains $Matches[2]) { throw 'Unerwarteter Eintrag im Journal.' }
-      $planned += $Matches[2]
+      $gm = Rx $lines[$i] '^Geplant (\d+): Ziel: ([^|]+)$'
+      if (-not $gm.Success) { throw 'Das Journal ist nicht lesbar.' }
+      if ($gm.Groups[1].Value -ne [string]($planned.Count + 1) -or $allowed -notcontains $gm.Groups[2].Value -or $planned -contains $gm.Groups[2].Value) { throw 'Unerwarteter Eintrag im Journal.' }
+      $planned += $gm.Groups[2].Value
       $i++
     }
     if ($planned.Count -eq 0) { throw 'Das Journal ist unvollstaendig.' }
@@ -1873,15 +1899,18 @@ try {
   $replacedLast = $true
     for (; $i -lt $lines.Count; $i++) {
       $line = $lines[$i]
-      if ($line -cmatch '^Ersetzt (\d+)$') {
-        if ($entries.Count -eq 0 -or $replacedLast -or $Matches[1] -ne $entries[$entries.Count - 1].N) { throw 'Das Journal ist nicht lesbar.' }
+      $rm = Rx $line '^Ersetzt (\d+)$'
+      if ($rm.Success) {
+        if ($entries.Count -eq 0 -or $replacedLast -or $rm.Groups[1].Value -ne $entries[$entries.Count - 1].N) { throw 'Das Journal ist nicht lesbar.' }
         $replacedLast = $true
         continue
       }
-      if ($withHash) { $ok = $line -cmatch '^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$' }
-      else { $ok = $line -cmatch '^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)()(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$' }
+      # Pfade enthalten nie ""|"": Felder als [^|]+ (eindeutig, lineare Laufzeit)
+      if ($withHash) { $vm = Rx $line '^Vorher (\d+): (Sicherung|Neu) \| Ziel: ([^|]+)(?: \| Sicherungsdatei: [^|]+ \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: ([^|]+)$' }
+      else { $vm = Rx $line '^Vorher (\d+): (Sicherung|Neu) \| Ziel: ([^|]+)()(?: \| Sicherungsdatei: [^|]+)? \| Hilfsdatei: ([^|]+)$' }
+      $ok = $vm.Success
       if (-not $ok) { throw 'Das Journal ist nicht lesbar.' }
-      $e = @{ N = $Matches[1]; Kind = $Matches[2]; Dst = $Matches[3]; Hash = [string]$Matches[4]; Tmp = $Matches[5] }
+      $e = @{ N = $vm.Groups[1].Value; Kind = $vm.Groups[2].Value; Dst = $vm.Groups[3].Value; Hash = [string]$vm.Groups[4].Value; Tmp = $vm.Groups[5].Value }
       if ($e.N -ne [string]($entries.Count + 1) -or ($format2 -and $entries.Count -gt 0 -and -not $replacedLast) -or $allowed -notcontains $e.Dst) { throw 'Unerwarteter Eintrag im Journal.' }
       if ($format2 -and ($entries.Count -ge $planned.Count -or $planned[$entries.Count] -ne $e.Dst)) { throw 'Unerwarteter Eintrag im Journal.' }
       # erhoeht nur Sicherungen mit Pruefsumme aus dem Journal (Format 2.67 hat keine): sonst nichts zuruecksetzen
@@ -1948,6 +1977,12 @@ if ($Elevated) {
 ";
 
         private const string RestartScript = @"
+# Regex auf fremde Daten (Datei, Journal, Manifest, Ordnernamen) nur mit Zeitlimit 250 ms; Zeitueberschreitung =
+# nicht eindeutig pruefbar, Abbruch (Globale Richtlinien, Regex-Pruefungen fremder Daten)
+function Rx([string]$s, [string]$p) {
+  try { return [System.Text.RegularExpressions.Regex]::Match($s, $p, [System.Text.RegularExpressions.RegexOptions]::None, [TimeSpan]::FromMilliseconds(250)) }
+  catch [System.Text.RegularExpressions.RegexMatchTimeoutException] { throw 'Nicht eindeutig pruefbar (Zeitlimit bei der Pruefung).' }
+}
 # alte Instanz an Prozess-ID und Startzeit erkennen (eine wiederverwendete Prozess-ID gilt nicht als alte Instanz)
 function Test-OldInstance {
   $p = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
@@ -1992,8 +2027,8 @@ function Show-Result {
   } catch {}
   if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.' }
   $icon = 'Warning'
-  if ($text -match '^OK ') { $icon = 'Information' }
-  $text = $text -replace '^(OK|FEHLER|ZURUECK|OFFEN) ', ''
+  if ($text.StartsWith('OK ')) { $icon = 'Information' }
+  foreach ($k in @('OK ', 'FEHLER ', 'ZURUECK ', 'OFFEN ')) { if ($text.StartsWith($k)) { $text = $text.Substring($k.Length); break } }
   try {
     Add-Type -AssemblyName System.Windows.Forms
     [void][System.Windows.Forms.MessageBox]::Show($text, 'Fensterpositionen', 'OK', $icon)
@@ -2025,7 +2060,7 @@ while ((Get-Date) -lt $end) {
   if (Test-Path -LiteralPath $StartFile) {
     $s = [string](Read-Small $StartFile)
     Remove-Item -LiteralPath $StartFile -Force
-    if ($s.Trim() -match '^[0-9]{1,10}$') { $Installer = [int]$s.Trim() }
+    try { if ((Rx $s.Trim() '^[0-9]{1,10}$').Success) { $Installer = [int]$s.Trim() } } catch {}
     break
   }
   if (-not (Test-OldInstance)) {
@@ -2125,7 +2160,7 @@ if ($text) { $text = $text.Trim() }
 # bleibt er erhalten und wird spaeter von der Bereinigung entfernt
 if ($Attempt -and $endConfirmed) { Remove-Item -LiteralPath $Attempt -Recurse -Force }
 # Neustart nur bei eindeutigem Abschluss: installiert (OK) oder nichts veraendert bzw. vollstaendig zurueckgesetzt (FEHLER)
-$clear = $text -and ($text -match '^(OK|FEHLER|ZURUECK) ') -and -not (Test-Path -LiteralPath (Join-Path $Work 'Wiederherstellung-offen'))
+$clear = $text -and ($text.StartsWith('OK ') -or $text.StartsWith('FEHLER ') -or $text.StartsWith('ZURUECK ')) -and -not (Test-Path -LiteralPath (Join-Path $Work 'Wiederherstellung-offen'))
 if (-not $clear) {
   if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.'; if ($waitNote) { $text += ' ' + $waitNote } }
   ($text + ' Fensterpositionen wurde nicht neu gestartet.') | Out-File -LiteralPath $Log -Encoding utf8

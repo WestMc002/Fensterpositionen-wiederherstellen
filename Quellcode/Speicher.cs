@@ -551,12 +551,17 @@ public static class Store {
  public static bool UsesNetwork(Entry e) {
   if(IsNetworkPath(e.Exe)||IsNetworkPath(e.File))return true;
   if(String.IsNullOrEmpty(e.Args))return false;
-  foreach(System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(e.Args,"\"([^\"]*)\"|(\\S+)")) {
-   string token=m.Groups[1].Success?m.Groups[1].Value:m.Groups[2].Value;
-   if(IsNetworkPath(token))return true;
-   int equals=token.IndexOf('=');
-   if(equals>=0&&IsNetworkPath(token.Substring(equals+1)))return true;
-  }
+  // Parameter stammen ggf. aus einer importierten Sicherung (fremde Daten): Regex mit Zeitlimit 250 ms; die beiden
+  // Alternativen beginnen mit verschiedenen Zeichen (" bzw. kein "), damit die Laufzeit linear bleibt. Zeitüberschreitung
+  // = nicht eindeutig prüfbar, gilt wie ein Netzwerkpfad (nur mit Freigabe).
+  try {
+   foreach(System.Text.RegularExpressions.Match m in new System.Text.RegularExpressions.Regex("\"([^\"]*)\"|([^\\s\"]\\S*)",System.Text.RegularExpressions.RegexOptions.None,TimeSpan.FromMilliseconds(250)).Matches(e.Args)) {
+    string token=m.Groups[1].Success?m.Groups[1].Value:m.Groups[2].Value;
+    if(IsNetworkPath(token))return true;
+    int equals=token.IndexOf('=');
+    if(equals>=0&&IsNetworkPath(token.Substring(equals+1)))return true;
+   }
+  } catch(System.Text.RegularExpressions.RegexMatchTimeoutException) {return true;}
   return false;
  }
  // Ersetzt Positionen.json (Globale Richtlinien): erst vollständig in eine Hilfsdatei schreiben und zurücklesen,
