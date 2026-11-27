@@ -1,6 +1,6 @@
 ﻿FENSTERPOSITIONEN
 ================
-Version 2.72 (Build-Datum wird angehängt, z.B. 2.72.2026.1125)
+Version 2.73 (Build-Datum wird angehängt, z.B. 2.73.2026.1127)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte (Programmliste und Positionen) verwendet, solange noch keine eigenen
@@ -734,9 +734,15 @@ Daten übertragen und keine Anmeldung gebraucht.
   liegengebliebenes Update aus 2.67 hat keine: Dann bitte Fensterpositionen
   neu herunterladen (die Meldung bietet die Download-Seite an).
 - Läuft Fensterpositionen mit Administratorrechten ("Als Administrator"
-  gestartet), wird weder aktualisiert noch eine vorherige Version
-  wiederhergestellt: Das Programm bittet, es normal zu starten. Auch die
-  Hilfsskripte prüfen ihre tatsächlichen Rechte.
+  gestartet), wird nicht mit diesen Rechten aktualisiert: Nach einer
+  Rückfrage startet Fensterpositionen mit normalen Rechten neu und
+  installiert das Update dort ohne weitere Rückfrage (bei "Automatisch
+  aktualisieren" ohne Rückfrage, sobald nichts läuft). Gibt es auf dem PC
+  keine normalen Rechte (Benutzerkontensteuerung aus oder das eingebaute
+  Konto "Administrator", z. B. auf Windows Server), laufen Update und
+  Wiederherstellung mit Administratorrechten, aber immer über einen
+  geschützten Ordner unter %ProgramData%. Auch die Hilfsskripte prüfen ihre
+  tatsächlichen Rechte.
 - Liegt der Programmordner unter "Programme" o. ä. ohne Schreibrechte, fragt
   Windows beim Aktualisieren nach Administratorrechten. Das Skript arbeitet
   dann in einem geschützten Ordner unter %ProgramData% und ändert erst etwas,
@@ -801,6 +807,14 @@ Da jeder Build eine neue Nebenversion bekommt, ist jeder Ordnername eindeutig,
 auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
+
+2.73           Update aus einer Instanz mit Administratorrechten (Globale
+               Richtlinien vom 27.11.2026): statt "Bitte normal starten"
+               startet Fensterpositionen mit normalen Rechten neu (Token der
+               Windows-Oberfläche, "--aktualisieren") und installiert dort;
+               ohne normale Rechte (Benutzerkontensteuerung aus, eingebauter
+               Administrator) Update und Wiederherstellung über den
+               geschützten Ordner unter %ProgramData%.
 
 2.72           Regex-Prüfungen fremder Daten (Globale Richtlinien vom
                25.11.2026): Manifest, Wiederherstellungsjournal, Ordnernamen,

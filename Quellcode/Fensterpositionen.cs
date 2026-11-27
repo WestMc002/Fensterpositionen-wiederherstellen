@@ -52,6 +52,15 @@ static class Program {
    MainForm.AfterUpdate=true;
    if(after+1<args.Length&&Updater.IsAttemptId(args[after+1]))MainForm.UpdateAttemptId=args[after+1];
   }
+  // "--aktualisieren <Prozess-ID>": Fensterpositionen lief mit Administratorrechten und hat sich für das Update mit
+  // normalen Rechten neu gestartet (Updater.RestartUnelevated) – nach dem Ende der alten Instanz ohne weitere Rückfrage
+  // aktualisieren. Löst nie einen weiteren Neustart aus.
+  int now=Array.FindIndex(args,x=>String.Equals(x,"--aktualisieren",StringComparison.OrdinalIgnoreCase));
+  if(now>=0) {
+   MainForm.InstallNow=true;
+   int old;
+   if(now+1<args.Length&&Int32.TryParse(args[now+1],System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out old))MainForm.InstallNowWaitFor=old;
+  }
   // Verknüpfung "Fenster wiederherstellen": --wiederherstellen [Anordnung] stellt minimiert wieder her und beendet sich bei Erfolg.
   int restore=Array.IndexOf(args,"--wiederherstellen");
   if(restore>=0) {

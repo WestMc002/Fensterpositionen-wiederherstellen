@@ -48,6 +48,12 @@ public class MainForm:Form {
  public static bool AfterUpdate;
  // Versuchskennung aus „--nach-update <Kennung>“ (ab 2.68), sonst null: Ergebnis aus der Datei dieses Versuchs.
  public static string UpdateAttemptId;
+ // „--aktualisieren <Prozess-ID>“: Neustart mit normalen Rechten für das Update (Updater.RestartUnelevated); nach dem
+ // Ende der alten Instanz ohne weitere Rückfrage installieren, Fehler melden. Nie ein weiterer Neustart.
+ public static bool InstallNow;
+ public static int InstallNowWaitFor;
+ // Beenden für den Neustart mit normalen Rechten: ohne Rückfrage nach ungespeicherten Änderungen (schon gefragt).
+ bool closingForUpdate;
  ActivityBar activity=new ActivityBar();
  FooterPanel footer=new FooterPanel();
  Bitmap signature;
@@ -276,7 +282,7 @@ public class MainForm:Form {
   alignVCenter.Click+=async(s,e)=>await AlignWindows("vcenter");
   alignAuto.Click+=async(s,e)=>await AlignWindows("auto");
   addProgram.Click+=(s,e)=>AddProgram();
-  FormClosing+=(s,e)=>{if(busy||!ConfirmLeaveView())e.Cancel=true;};
+  FormClosing+=(s,e)=>{if(closingForUpdate)return;if(busy||!ConfirmLeaveView())e.Cancel=true;};
   FormClosed+=(s,e)=>{navTimer.Stop();navHover.Stop();};
   ApplyTheme();
   Log(AppInfo.Product+" Version "+AppInfo.Version+" – Farbschema: "+(Ui.Dark?"dunkel":"hell")+", Akzentfarbe "+Ui.Hex(Ui.AccentBase));
@@ -309,7 +315,8 @@ public class MainForm:Form {
    // Per Verknüpfung: minimiert wiederherstellen; bei Erfolg beendet sich das Programm, sonst zeigt es das Protokoll.
    WindowState=FormWindowState.Minimized;
    Shown+=async(s,e)=>await RunAutoRestore();
-  } else Shown+=(s,e)=>{if(!DemoMode)updateTimer.Start();};
+  } else if(InstallNow&&!DemoMode&&!IsElevated()) Shown+=async(s,e)=>await RunInstallNow();
+  else Shown+=(s,e)=>{if(!DemoMode)updateTimer.Start();};
  }
  protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.DarkTitle(Handle);}
  // Windows meldet einen Wechsel zwischen hellem und dunklem Modus mit WM_SETTINGCHANGE "ImmersiveColorSet".
@@ -625,7 +632,7 @@ public class MainForm:Form {
     // Schon eine neue Version bekannt: gleich versuchen (erst nach dem Schließen des Info-Fensters).
     if(on&&available!=null)BeginInvoke((Action)TryAutoUpdate);
    },
-   CanInstall=()=>Updater.CanInstall(available)||(available!=null&&Updater.RepairPending),
+   CanInstall=()=>Updater.CanInstall(available)||(available!=null&&Updater.RepairPending)||Updater.OnlyElevationBlocks(available),
    Install=()=>BeginInvoke((Action)(async()=>await InstallUpdate(false))),
    OpenPage=()=>OpenReleasePage()
   };
@@ -720,11 +727,45 @@ public class MainForm:Form {
   return false;
  }
  // "Automatisch aktualisieren": installieren, wenn nichts läuft – sonst alle 5 Minuten erneut versuchen.
+ // Läuft Fensterpositionen mit Administratorrechten (und es gibt normale Rechte): mit normalen Rechten neu starten und
+ // dort installieren (nie nach „--aktualisieren“, damit sich nichts im Kreis startet).
  void TryAutoUpdate() {
   if(available==null||installing||DemoMode||!UpdateAutoInstall()||!UpdateAuto())return;
-  if(!Updater.CanInstall(available)||Updater.Busy)return;
+  bool restart=!InstallNow&&Updater.OnlyElevationBlocks(available);
+  if(!restart&&(!Updater.CanInstall(available)||Updater.Busy))return;
   if(BusyForUpdate()){autoUpdateRetry.Stop();autoUpdateRetry.Start();return;}
+  if(restart){RestartForUpdate();return;}
   BeginInvoke((Action)(async()=>await InstallUpdate(true)));
+ }
+ // Mit normalen Rechten neu starten („--aktualisieren“) und beenden; false = nicht möglich (Rückfallmeldung).
+ bool RestartForUpdate() {
+  if(!Updater.RestartUnelevated())return false;
+  Log("Fensterpositionen startet für das Update mit normalen Rechten neu.");
+  closingForUpdate=true;
+  busy=false;
+  Close();
+  return true;
+ }
+ // Nach „--aktualisieren“: auf das Ende der alten Instanz warten (höchstens 10 s), dann prüfen und ohne weitere
+ // Rückfrage installieren; Fehler werden gemeldet, weil das Update ausdrücklich gewollt war.
+ async Task RunInstallNow() {
+  int old=InstallNowWaitFor;
+  if(old>0&&old!=Process.GetCurrentProcess().Id) {
+   await Task.Run(()=>{
+    try {using(var p=Process.GetProcessById(old))p.WaitForExit(10000);} catch {}
+   });
+  }
+  await CheckForUpdates(true,true);
+  if(available==null) {
+   Log("Update nicht installiert – keine neuere Version gefunden.");
+   return;
+  }
+  if(!Updater.CanInstall(available)) {
+   string why=Updater.InstallBlocker()??(available.Problem??"Im Release ist keine passende ZIP-Datei.");
+   MessageBox.Show(this,"Update nicht installiert – Fensterpositionen läuft in der bisherigen Version weiter.\r\n\r\n"+why,"Update",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+   return;
+  }
+  await InstallUpdate(true,true);
  }
  void ShowUpdateBar(bool show) {
   show=show&&available!=null;
@@ -738,6 +779,7 @@ public class MainForm:Form {
    if(blocker==null&&available.Problem!=null)blocker=AppInfo.Product+" installiert dieses Update nicht: "+available.Problem+" "+available.ProblemDetail;
    bool repair=blocker==Updater.PendingText;
    string tip=repair?blocker+"\r\nEin Klick stellt die vorherige Version wieder her.":
+    Updater.OnlyElevationBlocks(available)?AppInfo.Product+" läuft mit Administratorrechten.\r\nEin Klick startet es mit normalen Rechten neu und installiert dann das Update.":
     blocker!=null?blocker+"\r\nKlick öffnet stattdessen die Release-Seite.":
     String.IsNullOrEmpty(available.ZipUrl)?"Im Release ist keine passende ZIP-Datei.\r\nKlick öffnet die Release-Seite.":
     "Signiertes Update laden, Programm beenden, EXE und Anleitung ersetzen und neu starten.\r\nGespeicherte Positionen und Einstellungen bleiben erhalten.";
@@ -759,7 +801,9 @@ public class MainForm:Form {
  }
  // automatic = "Automatisch aktualisieren": ohne Rückfrage, Fehler ohne Meldung (Hinweisleiste bleibt,
  // Kurzmeldung mit "Details" im Info-Fenster).
- async Task InstallUpdate(bool automatic) {
+ async Task InstallUpdate(bool automatic) {await InstallUpdate(automatic,false);}
+ // report = Fehler auch beim automatischen Installieren melden (nach „--aktualisieren“).
+ async Task InstallUpdate(bool automatic,bool report) {
   if(busy||installing||available==null)return;
   var info=available;
   if(!automatic&&Updater.Busy) {
@@ -775,6 +819,15 @@ public class MainForm:Form {
     Close();
    }
    return;
+  }
+  if(!automatic&&!InstallNow&&Updater.OnlyElevationBlocks(info)) {
+   // Nicht mit Administratorrechten aktualisieren, sondern mit normalen Rechten neu starten und dort installieren.
+   if(MessageBox.Show(this,AppInfo.Product+" läuft gerade mit Administratorrechten. Für das Update startet "+AppInfo.Product+
+    " mit normalen Rechten neu und installiert dann Version "+info.Version+".\r\nEinstellungen bleiben erhalten.\r\n\r\nJetzt aktualisieren?",
+    "Update",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+   if(!ConfirmLeaveView())return;
+   if(RestartForUpdate())return;
+   // Neustart nicht möglich: wie bisher auf den normalen Start verweisen (Meldung unten)
   }
   if(!Updater.CanInstall(info)) {
    if(automatic)return;
@@ -799,7 +852,7 @@ public class MainForm:Form {
    installing=false;
    Log((automatic?"Automatisches Update":"Update")+" fehlgeschlagen: "+ex.Message);
    if(automatic)updateError=UpdateStatus.FromError(ex);
-   else MessageBox.Show(this,ex.Message,"Update",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+   if(!automatic||report)MessageBox.Show(this,(report?"Update nicht installiert – Fensterpositionen läuft in der bisherigen Version weiter.\r\n\r\n":"")+ex.Message,"Update",MessageBoxButtons.OK,MessageBoxIcon.Warning);
    updateBar.Text=text;
    SetBusy(false);
    foreach(var b in new[]{updateBar.Page,updateBar.Later})b.Enabled=true;

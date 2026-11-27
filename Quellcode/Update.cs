@@ -14,6 +14,7 @@ using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -398,11 +399,139 @@ namespace Fensterpositionen
         {
             if (InProjectFolder)
                 return "Im Projektordner (mit Erstellen.bat) wird nicht automatisch aktualisiert – dort entsteht die EXE beim Erstellen.";
-            if (IsElevated)
+            // mit Administratorrechten nur aktualisieren, wenn es auf diesem System keine normalen Rechte gibt (dann über
+            // den geschützten Arbeitsordner unter ProgramData); sonst mit normalen Rechten neu starten (RestartUnelevated)
+            if (IsElevated && !AlwaysElevated)
                 return ElevatedText;
             if (PendingRestore() != null) return PendingText;
             return null;
         }
+
+        /// <summary>
+        /// Steht dem Update nur im Weg, dass Fensterpositionen mit Administratorrechten läuft (und es normale Rechte gibt)?
+        /// Dann startet es sich mit normalen Rechten neu (RestartUnelevated, „--aktualisieren“) und installiert dort.
+        /// </summary>
+        public static bool OnlyElevationBlocks(ReleaseInfo u)
+        {
+            if (u == null || u.Problem != null || string.IsNullOrEmpty(u.ZipUrl) || string.IsNullOrEmpty(u.Sha256) || u.Manifest == null) return false;
+            return InstallBlocker() == ElevatedText;
+        }
+
+        /// <summary>
+        /// Fensterpositionen mit normalen Rechten neu starten („--aktualisieren &lt;Prozess-ID&gt;“): mit dem Benutzerkonto
+        /// der Windows-Oberfläche (Token des Explorers, CreateProcessWithTokenW), nicht mit den eigenen Administratorrechten.
+        /// Läuft auch die Oberfläche erhöht (Benutzerkontensteuerung aus), wird nichts gestartet. Der Aufrufer beendet sich
+        /// danach; die neue Instanz wartet auf sein Ende und installiert dann ohne weitere Rückfrage. Referenz: Dock Pilot
+        /// nach 1.80 (Globale Richtlinien 27.11.2026, „Update aus einer Instanz mit Administratorrechten“).
+        /// </summary>
+        public static bool RestartUnelevated()
+        {
+            IntPtr token = IntPtr.Zero;
+            try
+            {
+                token = ShellToken();
+                if (token == IntPtr.Zero) return false;
+                string exe = Application.ExecutablePath;
+                string cmd = "\"" + exe + "\" --aktualisieren " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
+                StartupInfo si = new StartupInfo();
+                si.cb = Marshal.SizeOf(typeof(StartupInfo));
+                ProcessInfo pi;
+                if (!CreateProcessWithTokenW(token, 0, exe, cmd, 0, IntPtr.Zero, Path.GetDirectoryName(exe), ref si, out pi))
+                {
+                    TraceLog.Write("Update: Neustart mit normalen Rechten nicht möglich (Fehler " + Marshal.GetLastWin32Error() + ").");
+                    return false;
+                }
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                TraceLog.Write("Update: mit normalen Rechten neu gestartet, um das Update zu installieren.");
+                return true;
+            }
+            catch (Exception ex) { TraceLog.Write("Update: Neustart mit normalen Rechten nicht möglich: " + ex.Message); return false; }
+            finally
+            {
+                if (token != IntPtr.Zero) CloseHandle(token);
+            }
+        }
+
+        /// <summary>
+        /// Primäres Token der Windows-Oberfläche (Explorer) mit normalen Rechten, sonst IntPtr.Zero (keine Oberfläche,
+        /// kein Zugriff oder die Oberfläche läuft selbst erhöht). Der Aufrufer gibt es mit CloseHandle frei.
+        /// </summary>
+        private static IntPtr ShellToken()
+        {
+            IntPtr proc = IntPtr.Zero, shellToken = IntPtr.Zero, token = IntPtr.Zero;
+            try
+            {
+                IntPtr shell = GetShellWindow();
+                if (shell == IntPtr.Zero) return IntPtr.Zero;
+                uint pid;
+                GetWindowThreadProcessId(shell, out pid);
+                if (pid == 0) return IntPtr.Zero;
+                proc = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+                if (proc == IntPtr.Zero) return IntPtr.Zero;
+                if (!OpenProcessToken(proc, 0x0002, out shellToken)) return IntPtr.Zero; // TOKEN_DUPLICATE
+                // TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID
+                if (!DuplicateTokenEx(shellToken, 0x018B, IntPtr.Zero, 2, 1, out token)) { token = IntPtr.Zero; return IntPtr.Zero; }
+                int elevated, len;
+                if (!GetTokenInformation(token, 20, out elevated, 4, out len) || elevated != 0) return IntPtr.Zero; // TokenElevation
+                IntPtr result = token;
+                token = IntPtr.Zero;
+                return result;
+            }
+            catch { return IntPtr.Zero; }
+            finally
+            {
+                if (token != IntPtr.Zero) CloseHandle(token);
+                if (shellToken != IntPtr.Zero) CloseHandle(shellToken);
+                if (proc != IntPtr.Zero) CloseHandle(proc);
+            }
+        }
+
+        /// <summary>
+        /// Läuft Fensterpositionen mit Administratorrechten auf einem System ohne normale Rechte (Benutzerkontensteuerung
+        /// aus oder eingebautes Konto „Administrator“, z. B. auf Windows Server)? Dann gibt es keinen Neustart mit normalen
+        /// Rechten; Update und Wiederherstellung laufen mit Administratorrechten, aber immer über den geschützten
+        /// Arbeitsordner unter %ProgramData%. Erkennung: Die Windows-Oberfläche liefert kein Token mit normalen Rechten;
+        /// ohne Oberfläche gilt das ebenso, weil dann niemand normal starten kann.
+        /// </summary>
+        public static bool AlwaysElevated
+        {
+            get
+            {
+                if (!IsElevated) return false;
+                IntPtr token = ShellToken();
+                if (token == IntPtr.Zero) return true;
+                CloseHandle(token);
+                return false;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct StartupInfo
+        {
+            public int cb;
+            public string lpReserved, lpDesktop, lpTitle;
+            public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+            public short wShowWindow, cbReserved2;
+            public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProcessInfo
+        {
+            public IntPtr hProcess, hThread;
+            public int dwProcessId, dwThreadId;
+        }
+
+        [DllImport("user32.dll")] private static extern IntPtr GetShellWindow();
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attributes, int impersonation, int type, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool CreateProcessWithTokenW(IntPtr token, int logonFlags, string application, string commandLine, int creationFlags, IntPtr environment, string currentDirectory, ref StartupInfo startup, out ProcessInfo info);
 
         /// <summary>Läuft die EXE im Projektordner (Erstellen.bat daneben)? Dort entsteht sie beim Bauen.</summary>
         private static bool InProjectFolder
@@ -562,7 +691,9 @@ namespace Fensterpositionen
             }
             string logFile = LogFor(attemptId);
             string exe = Application.ExecutablePath;
-            bool elevated = !CanWrite(Path.GetDirectoryName(exe));
+            // Ohne normale Rechte (AlwaysElevated) läuft Fensterpositionen schon erhöht: dann immer der geschützte Weg, auch
+            // wenn die Schreibprobe gelingt (sonst liefe das Skript erhöht mit Arbeitsordner im Temp-Ordner)
+            bool elevated = IsElevated || !CanWrite(Path.GetDirectoryName(exe));
             // Erhöht: eigener, nicht vorhersagbarer Arbeitsordner direkt unter ProgramData, den das Skript nur für
             // Administratoren beschreibbar anlegt. Sonst reicht der Arbeitsordner im Temp-Ordner des Benutzers.
             string work = elevated
@@ -980,8 +1111,9 @@ namespace Fensterpositionen
         {
             // im Projektordner (Erstellen.bat neben der EXE) wird nie etwas zurückgesetzt, wie beim Update
             if (InProjectFolder) return false;
-            // nie aus einer Instanz mit Administratorrechten (sonst liefe die Reparatur mit geerbten Rechten)
-            if (IsElevated)
+            // nie aus einer Instanz mit Administratorrechten (sonst liefe die Reparatur mit geerbten Rechten) – außer auf
+            // Systemen ohne normale Rechte; dort nur geschützte Arbeitsordner unter ProgramData (Repair prüft das)
+            if (IsElevated && !AlwaysElevated)
             {
                 MessageBox.Show(owner, ElevatedText,
                     "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1037,9 +1169,14 @@ namespace Fensterpositionen
         private static void Repair(string dir, bool tray)
         {
             if (InProjectFolder) throw new Exception("Im Projektordner wird nichts zurückgesetzt.");
-            if (IsElevated) throw new Exception(ElevatedText);
             string data = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             bool protectedDir = string.Equals(Path.GetDirectoryName(dir), data, StringComparison.OrdinalIgnoreCase);
+            // Sicherungen aus dem Temp-Ordner nie erhöht zurückkopieren; erhöht nur ohne normale Rechte (AlwaysElevated)
+            // und nur aus dem geschützten Arbeitsordner unter ProgramData
+            if (IsElevated && !(AlwaysElevated && protectedDir))
+                throw new Exception(AlwaysElevated
+                    ? "Die vorherige Version lässt sich nicht automatisch wiederherstellen. Bitte Fensterpositionen neu herunterladen."
+                    : ElevatedText);
             string exe = Application.ExecutablePath;
             bool writable = CanWrite(Path.GetDirectoryName(exe));
             // Sicherungen aus dem Temp-Ordner nie mit Administratorrechten zurückkopieren (jedes Programm des Benutzers
