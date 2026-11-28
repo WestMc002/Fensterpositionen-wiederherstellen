@@ -749,11 +749,13 @@ public class MainForm:Form {
  // Nach „--aktualisieren“: auf das Ende der alten Instanz warten (höchstens 10 s), dann prüfen und ohne weitere
  // Rückfrage installieren; Fehler werden gemeldet, weil das Update ausdrücklich gewollt war.
  async Task RunInstallNow() {
+  // Nur fortfahren, wenn das Ende der alten Instanz feststeht (Befund P3 aus 2.73); sonst melden und abbrechen.
   int old=InstallNowWaitFor;
-  if(old>0&&old!=Process.GetCurrentProcess().Id) {
-   await Task.Run(()=>{
-    try {using(var p=Process.GetProcessById(old))p.WaitForExit(10000);} catch {}
-   });
+  string waitProblem=await Task.Run(()=>WaitForOldInstance(old,10000));
+  if(waitProblem!=null) {
+   Log("Update nicht installiert: "+waitProblem);
+   MessageBox.Show(this,"Update nicht installiert – "+waitProblem+"\r\n\r\nBitte "+AppInfo.Product+" vollständig beenden, neu starten und dann aktualisieren.","Update",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+   return;
   }
   await CheckForUpdates(true,true);
   if(available==null) {
@@ -767,6 +769,31 @@ public class MainForm:Form {
   }
   await InstallUpdate(true,true);
  }
+ // Wartet höchstens timeout ms auf das Ende der Instanz mit dieser Prozess-ID (die alte, erhöhte Instanz vor dem Neustart
+ // mit normalen Rechten). null = Ende steht fest (beendet oder keine solche Prozess-ID mehr), sonst der Grund.
+ // Über PROCESS_QUERY_LIMITED_INFORMATION und GetExitCodeProcess, weil ein normaler Prozess auf einen erhöhten nicht mit
+ // SYNCHRONIZE warten darf. Wird die Prozess-ID inzwischen neu vergeben, endet das Warten mit der Zeitüberschreitung.
+ static string WaitForOldInstance(int pid,int timeout) {
+  if(pid<=0)return "Die vorherige Instanz ist unbekannt (Start ohne Prozess-ID).";
+  if(pid==Process.GetCurrentProcess().Id)return "Ungültige Prozess-ID der vorherigen Instanz.";
+  IntPtr h=OpenProcess(0x1000,false,pid);
+  if(h==IntPtr.Zero) {
+   int error=Marshal.GetLastWin32Error();
+   if(error==87)return null; // ERROR_INVALID_PARAMETER: kein Prozess mit dieser ID mehr
+   return "Kein Zugriff auf die vorherige Instanz (Windows-Fehler "+error+").";
+  }
+  try {
+   var timer=Stopwatch.StartNew();
+   while(true) {
+    uint code;
+    if(!GetExitCodeProcess(h,out code))return "Zustand der vorherigen Instanz nicht lesbar (Windows-Fehler "+Marshal.GetLastWin32Error()+").";
+    if(code!=259)return null; // nicht mehr STILL_ACTIVE
+    if(timer.ElapsedMilliseconds>=timeout)return "Die vorherige Instanz läuft nach "+(timeout/1000)+" Sekunden noch.";
+    Thread.Sleep(200);
+   }
+  } finally {CloseHandle(h);}
+ }
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
  void ShowUpdateBar(bool show) {
   show=show&&available!=null;
   if(show==updateBar.Visible)return;

@@ -1,6 +1,6 @@
 ﻿FENSTERPOSITIONEN
 ================
-Version 2.73 (Build-Datum wird angehängt, z.B. 2.73.2026.1127)
+Version 2.74 (Build-Datum wird angehängt, z.B. 2.74.2026.1128)
 Start: "Fensterpositionen wiederherstellen.exe" per Doppelklick.
 Liegt neben der EXE der Ordner Resources mit Startwerte.json, werden diese
 Werte (Programmliste und Positionen) verwendet, solange noch keine eigenen
@@ -737,7 +737,12 @@ Daten übertragen und keine Anmeldung gebraucht.
   gestartet), wird nicht mit diesen Rechten aktualisiert: Nach einer
   Rückfrage startet Fensterpositionen mit normalen Rechten neu und
   installiert das Update dort ohne weitere Rückfrage (bei "Automatisch
-  aktualisieren" ohne Rückfrage, sobald nichts läuft). Gibt es auf dem PC
+  aktualisieren" ohne Rückfrage, sobald nichts läuft). Der Neustart bleibt
+  im selben Benutzerkonto: Gehört die Windows-Oberfläche einem anderen Konto
+  (z. B. "Als anderer Benutzer ausführen"), startet Fensterpositionen nicht
+  neu, sondern bittet, es im eigenen Konto normal zu starten. Installiert
+  wird erst, wenn die vorherige Instanz sicher beendet ist (höchstens
+  10 Sekunden), sonst erscheint ein Hinweis. Gibt es auf dem PC
   keine normalen Rechte (Benutzerkontensteuerung aus oder das eingebaute
   Konto "Administrator", z. B. auf Windows Server), laufen Update und
   Wiederherstellung mit Administratorrechten, aber immer über einen
@@ -807,6 +812,12 @@ Da jeder Build eine neue Nebenversion bekommt, ist jeder Ordnername eindeutig,
 auch bei mehreren Builds am selben Tag (v2.1..., v2.2..., v2.3...).
 Für eine neue Hauptversion MAJOR in Erstellen.bat ändern (z.B. 3);
 die Nebenversion beginnt dann wieder bei 0.
+
+2.74           Sicherheitsprüfung von 2.73: Der Neustart mit normalen Rechten
+               für ein Update wechselt nie das Benutzerkonto (Vergleich der
+               Benutzer-SID mit der Windows-Oberfläche, sonst Hinweis); die
+               neue Instanz installiert nur, wenn das Ende der vorherigen
+               feststeht (sonst Hinweis, kein Update).
 
 2.73           Update aus einer Instanz mit Administratorrechten (Globale
                Richtlinien vom 27.11.2026): statt "Bitte normal starten"

@@ -189,6 +189,9 @@ namespace Fensterpositionen
 
         // Programmname im Manifest (= Name der EXE, Signieren.ps1 -Programm)
         private const string ManifestProgram = "Fensterpositionen wiederherstellen";
+        // Die Windows-Oberfläche gehört einem anderen Benutzerkonto (z. B. „Als anderer Benutzer ausführen“): kein Neustart
+        // in deren Konto, sondern Hinweis, Fensterpositionen im eigenen Konto normal zu starten (Befund P2 aus 2.73).
+        private const string OtherUserText = "Fensterpositionen läuft mit Administratorrechten unter einem anderen Benutzerkonto als die Windows-Oberfläche. Bitte Fensterpositionen in diesem Benutzerkonto normal starten (nicht „Als Administrator“) und dann aktualisieren.";
         private const string ElevatedText = "Fensterpositionen läuft gerade mit Administratorrechten. Bitte Fensterpositionen normal starten (nicht „Als Administrator“) und dann aktualisieren.";
 
         // ------------------------------------------------------------------ Signatur
@@ -402,7 +405,7 @@ namespace Fensterpositionen
             // mit Administratorrechten nur aktualisieren, wenn es auf diesem System keine normalen Rechte gibt (dann über
             // den geschützten Arbeitsordner unter ProgramData); sonst mit normalen Rechten neu starten (RestartUnelevated)
             if (IsElevated && !AlwaysElevated)
-                return ElevatedText;
+                return ShellIsOtherUser ? OtherUserText : ElevatedText;
             if (PendingRestore() != null) return PendingText;
             return null;
         }
@@ -429,8 +432,13 @@ namespace Fensterpositionen
             IntPtr token = IntPtr.Zero;
             try
             {
-                token = ShellToken();
-                if (token == IntPtr.Zero) return false;
+                bool otherUser;
+                token = ShellToken(out otherUser);
+                if (token == IntPtr.Zero)
+                {
+                    if (otherUser) TraceLog.Write("Update: kein Neustart mit normalen Rechten – die Windows-Oberfläche gehört einem anderen Benutzerkonto.");
+                    return false;
+                }
                 string exe = Application.ExecutablePath;
                 string cmd = "\"" + exe + "\" --aktualisieren " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
                 StartupInfo si = new StartupInfo();
@@ -459,6 +467,34 @@ namespace Fensterpositionen
         /// </summary>
         private static IntPtr ShellToken()
         {
+            bool otherUser;
+            return ShellToken(out otherUser);
+        }
+
+        /// <summary>
+        /// Gehört die Windows-Oberfläche (mit normalen Rechten) einem anderen Benutzerkonto als Fensterpositionen?
+        /// Dann weder Neustart mit ihrem Token noch „keine normalen Rechte“ annehmen.
+        /// </summary>
+        private static bool ShellIsOtherUser
+        {
+            get
+            {
+                if (!IsElevated) return false;
+                bool otherUser;
+                IntPtr token = ShellToken(out otherUser);
+                if (token != IntPtr.Zero) CloseHandle(token);
+                return otherUser;
+            }
+        }
+
+        /// <summary>
+        /// Wie ShellToken(), dazu otherUser = true, wenn das nicht erhöhte Token der Oberfläche zu einem anderen
+        /// Benutzerkonto (SID) gehört als der eigene Prozess; dann wird kein Token zurückgegeben (Befund P2 aus 2.73:
+        /// der Neustart darf das Benutzerkonto nicht wechseln). Nicht lesbare SID gilt ebenso als anderes Konto.
+        /// </summary>
+        private static IntPtr ShellToken(out bool otherUser)
+        {
+            otherUser = false;
             IntPtr proc = IntPtr.Zero, shellToken = IntPtr.Zero, token = IntPtr.Zero;
             try
             {
@@ -474,6 +510,20 @@ namespace Fensterpositionen
                 if (!DuplicateTokenEx(shellToken, 0x018B, IntPtr.Zero, 2, 1, out token)) { token = IntPtr.Zero; return IntPtr.Zero; }
                 int elevated, len;
                 if (!GetTokenInformation(token, 20, out elevated, 4, out len) || elevated != 0) return IntPtr.Zero; // TokenElevation
+                // gleiches Benutzerkonto (SID) wie der eigene Prozess, sonst kein Neustart mit diesem Token
+                bool same = false;
+                try
+                {
+                    using (System.Security.Principal.WindowsIdentity shellUser = new System.Security.Principal.WindowsIdentity(token))
+                    using (System.Security.Principal.WindowsIdentity self = System.Security.Principal.WindowsIdentity.GetCurrent())
+                        same = shellUser.User != null && self.User != null && shellUser.User.Equals(self.User);
+                }
+                catch { same = false; }
+                if (!same)
+                {
+                    otherUser = true;
+                    return IntPtr.Zero;
+                }
                 IntPtr result = token;
                 token = IntPtr.Zero;
                 return result;
@@ -499,7 +549,10 @@ namespace Fensterpositionen
             get
             {
                 if (!IsElevated) return false;
-                IntPtr token = ShellToken();
+                bool otherUser;
+                IntPtr token = ShellToken(out otherUser);
+                // Oberfläche eines anderen Kontos: es kann normale Rechte geben, nur nicht über diese Oberfläche
+                if (otherUser) return false;
                 if (token == IntPtr.Zero) return true;
                 CloseHandle(token);
                 return false;
